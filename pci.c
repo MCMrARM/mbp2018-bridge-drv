@@ -11,6 +11,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
     struct bce_device *bce = NULL;
     int status = 0;
+    int nvec;
 
     pr_info("bce: capturing our device");
 
@@ -18,6 +19,11 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         return -ENODEV;
     if (pci_request_regions(dev, "bce")) {
         status = -ENODEV;
+        goto fail;
+    }
+    nvec = pci_alloc_irq_vectors(dev, 1, 8, PCI_IRQ_MSI);
+    if (nvec < 5) {
+        status = -EINVAL;
         goto fail;
     }
 
@@ -47,13 +53,18 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
 
-    request_irq(0, bce_handle_mb_irq, 0, "mailbox interrupt", dev);
+    status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox");
+    if (status)
+        goto fail_interrupt;
 
     if ((status = bce_fw_version_handshake(bce)))
-        goto fail;
+        goto fail_interrupt;
 
     pr_info("bce: device probe success");
+    return 0;
 
+fail_interrupt:
+    pci_free_irq(dev, 0, dev);
 fail:
     if (bce && bce->dev)
         device_destroy(bce_class, bce->devt);
@@ -64,6 +75,7 @@ fail:
     if (!IS_ERR_OR_NULL(bce->reg_mem_dma))
         pci_iounmap(dev, bce->reg_mem_dma);
 
+    pci_free_irq_vectors(dev);
     pci_release_regions(dev);
     pci_disable_device(dev);
 
@@ -98,9 +110,11 @@ static void bce_remove(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
 
+    pci_free_irq(dev, 0, dev);
     pci_iounmap(dev, bce->reg_mem_mb);
     pci_iounmap(dev, bce->reg_mem_dma);
     device_destroy(bce_class, bce->devt);
+    pci_free_irq_vectors(dev);
     pci_release_regions(dev);
     pci_disable_device(dev);
     kfree(bce);
