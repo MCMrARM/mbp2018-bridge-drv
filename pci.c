@@ -32,8 +32,10 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     bce->devt = bce_chrdev;
     bce->dev = device_create(bce_class, &dev->dev, bce->devt, NULL, "bce");
-    if (IS_ERR_OR_NULL(bce->dev))
+    if (IS_ERR_OR_NULL(bce->dev)) {
+        status = PTR_ERR(bce_class);
         goto fail;
+    }
 
     bce->reg_mem_mb = pci_iomap(dev, 0x20, 0);
     bce->reg_mem_dma = pci_iomap(dev, 0x18, 0);
@@ -64,6 +66,9 @@ fail:
 
     pci_release_regions(dev);
     pci_disable_device(dev);
+
+    if (!status)
+        status = -EINVAL;
     return status;
 }
 
@@ -117,19 +122,25 @@ struct pci_driver bce_pci_driver = {
 static int __init bce_module_init(void)
 {
     int result;
-    result = pci_register_driver(&bce_pci_driver);
-    if (result)
-        return result;
-    if (alloc_chrdev_region(&bce_chrdev, 0, 1, "bce"))
+    if ((result = alloc_chrdev_region(&bce_chrdev, 0, 1, "bce")))
         goto fail_chrdev;
     bce_class = class_create(THIS_MODULE, "bce");
-    if (IS_ERR_OR_NULL(bce_class))
+    if (IS_ERR(bce_class)) {
+        result = PTR_ERR(bce_class);
         goto fail_class;
+    }
+    result = pci_register_driver(&bce_pci_driver);
+    if (result)
+        goto fail_drv;
 
+fail_drv:
+    pci_unregister_driver(&bce_pci_driver);
 fail_class:
     class_destroy(bce_class);
 fail_chrdev:
     unregister_chrdev_region(bce_chrdev, 1);
+    if (!result)
+        result = -EINVAL;
     return result;
 }
 static void __exit bce_module_exit(void)
