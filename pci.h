@@ -6,7 +6,9 @@
 #define BC_PROTOCOL_VERSION 0x20001
 
 struct bce_device {
-    struct pci_dev *dev;
+    struct pci_dev *pci;
+    dev_t devt;
+    struct device *dev;
     void __iomem *reg_mem_mb;
     void __iomem *reg_mem_dma;
     struct bce_mailbox mbox;

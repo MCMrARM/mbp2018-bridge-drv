@@ -1,6 +1,9 @@
 #include "pci.h"
 #include <linux/module.h>
 
+static dev_t bce_chrdev;
+static struct class *bce_class;
+
 static irqreturn_t bce_handle_mb_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
 
@@ -13,16 +16,29 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     if (pci_enable_device(dev))
         return -ENODEV;
-    if (pci_request_regions(dev, "bce"))
-        return -ENODEV;
+    if (pci_request_regions(dev, "bce")) {
+        status = -ENODEV;
+        goto fail;
+    }
 
     bce = kzalloc(sizeof(struct bce_device), GFP_KERNEL);
+    if (!bce) {
+        status = -ENOMEM;
+        goto fail;
+    }
+
+    bce->pci = dev;
     pci_set_drvdata(dev, bce);
-    bce->dev = dev;
+
+    bce->devt = bce_chrdev;
+    bce->dev = device_create(bce_class, &dev->dev, bce->devt, NULL, "bce");
+    if (IS_ERR_OR_NULL(bce->dev))
+        goto fail;
+
     bce->reg_mem_mb = pci_iomap(dev, 0x20, 0);
     bce->reg_mem_dma = pci_iomap(dev, 0x18, 0);
 
-    if (bce->reg_mem_mb == NULL || bce->reg_mem_dma == NULL) {
+    if (IS_ERR_OR_NULL(bce->reg_mem_mb) || IS_ERR_OR_NULL(bce->reg_mem_dma)) {
         pr_err("bce: Failed to pci_iomap required regions");
         goto fail;
     }
@@ -37,7 +53,17 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     pr_info("bce: device probe success");
 
 fail:
+    if (bce && bce->dev)
+        device_destroy(bce_class, bce->devt);
     kfree(bce);
+
+    if (!IS_ERR_OR_NULL(bce->reg_mem_mb))
+        pci_iounmap(dev, bce->reg_mem_mb);
+    if (!IS_ERR_OR_NULL(bce->reg_mem_dma))
+        pci_iounmap(dev, bce->reg_mem_dma);
+
+    pci_release_regions(dev);
+    pci_disable_device(dev);
     return status;
 }
 
@@ -67,6 +93,9 @@ static void bce_remove(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
 
+    pci_iounmap(dev, bce->reg_mem_mb);
+    pci_iounmap(dev, bce->reg_mem_dma);
+    device_destroy(bce_class, bce->devt);
     pci_release_regions(dev);
     pci_disable_device(dev);
     kfree(bce);
@@ -87,11 +116,26 @@ struct pci_driver bce_pci_driver = {
 
 static int __init bce_module_init(void)
 {
-    pci_register_driver(&bce_pci_driver);
-    return 0;
+    int result;
+    result = pci_register_driver(&bce_pci_driver);
+    if (result)
+        return result;
+    if (alloc_chrdev_region(&bce_chrdev, 0, 1, "bce"))
+        goto fail_chrdev;
+    bce_class = class_create(THIS_MODULE, "bce");
+    if (IS_ERR_OR_NULL(bce_class))
+        goto fail_class;
+
+fail_class:
+    class_destroy(bce_class);
+fail_chrdev:
+    unregister_chrdev_region(bce_chrdev, 1);
+    return result;
 }
 static void __exit bce_module_exit(void)
 {
+    class_destroy(bce_class);
+    unregister_chrdev_region(bce_chrdev, 1);
     pci_unregister_driver(&bce_pci_driver);
 }
 
