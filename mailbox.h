@@ -7,7 +7,7 @@
 struct bce_mailbox {
     void __iomem *reg_mb;
 
-    atomic_t mb_taken; // if someone is currently sending a message
+    atomic_t mb_status; // possible statuses: 0 (no msg), 1 (has active msg), 2 (got reply)
     struct completion mb_completion;
     uint64_t mb_result;
 };
