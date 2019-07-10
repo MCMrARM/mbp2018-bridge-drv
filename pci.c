@@ -37,8 +37,8 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail;
     }
 
-    bce->reg_mem_mb = pci_iomap(dev, 0x20, 0);
-    bce->reg_mem_dma = pci_iomap(dev, 0x18, 0);
+    bce->reg_mem_mb = pci_iomap(dev, 4, 0);
+    bce->reg_mem_dma = pci_iomap(dev, 2, 0);
 
     if (IS_ERR_OR_NULL(bce->reg_mem_mb) || IS_ERR_OR_NULL(bce->reg_mem_dma)) {
         pr_err("bce: Failed to pci_iomap required regions");
