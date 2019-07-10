@@ -5,12 +5,11 @@
 #include <linux/pci.h>
 
 struct bce_mailbox {
-    struct pci_dev *dev;
     void __iomem *reg_mb;
 
     atomic_t mb_taken; // if someone is currently sending a message
     struct completion mb_completion;
-    uint64_t result;
+    uint64_t mb_result;
 };
 
 enum bce_message_type {
@@ -21,8 +20,10 @@ enum bce_message_type {
 #define BCE_MB_TYPE(v) ((u32) (v >> 58))
 #define BCE_MB_VALUE(v) (v & 0x3FFFFFFFFFFFFFFLL)
 
-void bce_mailbox_init(struct bce_mailbox* mb, struct pci_dev* dev, void __iomem *reg_mb);
+void bce_mailbox_init(struct bce_mailbox *mb, void __iomem *reg_mb);
 
-int bce_mailbox_send(struct bce_mailbox* mb, u64 msg, u64* recv);
+int bce_mailbox_send(struct bce_mailbox *mb, u64 msg, u64* recv);
+
+int bce_mailbox_handle_interrupt(struct bce_mailbox *mb);
 
 #endif //BCEDRIVER_MAILBOX_H

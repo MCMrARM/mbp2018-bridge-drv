@@ -1,6 +1,7 @@
 #include "pci.h"
 #include <linux/module.h>
 
+static irqreturn_t bce_handle_mb_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
 
 static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
@@ -26,7 +27,9 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail;
     }
 
-    bce_mailbox_init(&bce->mbox, dev, bce->reg_mem_mb);
+    bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
+
+    request_irq(0, bce_handle_mb_irq, 0, "mailbox interrupt", dev);
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail;
@@ -36,6 +39,13 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 fail:
     kfree(bce);
     return status;
+}
+
+static irqreturn_t bce_handle_mb_irq(int irq, void *dev)
+{
+    struct bce_device *bce = pci_get_drvdata(dev);
+    bce_mailbox_handle_interrupt(&bce->mbox);
+    return IRQ_HANDLED;
 }
 
 static int bce_fw_version_handshake(struct bce_device *bce) {
