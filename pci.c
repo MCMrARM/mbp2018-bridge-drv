@@ -147,6 +147,8 @@ static int __init bce_module_init(void)
     if (result)
         goto fail_drv;
 
+    return 0;
+
 fail_drv:
     pci_unregister_driver(&bce_pci_driver);
 fail_class:
