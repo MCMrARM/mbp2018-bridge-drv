@@ -11,7 +11,7 @@ struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el
     q->data = dma_alloc_coherent(&dev->pci->dev, el_count * sizeof(struct bce_qe_completion),
             &q->dma_handle, GFP_KERNEL);
     if (!q->data) {
-        pr_err("DMA queue memory alloc failed");
+        pr_err("DMA queue memory alloc failed\n");
         kfree(q);
         return q;
     }
@@ -39,17 +39,17 @@ static void bce_queue_handle_completion(struct bce_device *dev, struct bce_qe_co
     struct bce_queue *target;
     struct bce_queue_sq *target_sq;
     if (e->qid >= BCE_MAX_QUEUE_COUNT) {
-        pr_err("Device sent a response for qid (%u) >= BCE_MAX_QUEUE_COUNT", e->qid);
+        pr_err("Device sent a response for qid (%u) >= BCE_MAX_QUEUE_COUNT\n", e->qid);
         return;
     }
     target = dev->queues[e->qid];
     if (!target || target->type != BCE_QUEUE_SQ) {
-        pr_err("Device sent a response for qid (%u), which does not exist", e->qid);
+        pr_err("Device sent a response for qid (%u), which does not exist\n", e->qid);
         return;
     }
     target_sq = (struct bce_queue_sq *) target;
     if (target_sq->expected_completion_index != e->completion_index) {
-        pr_err("Completion index mismatch; this is likely going to make this driver unusable");
+        pr_err("Completion index mismatch; this is likely going to make this driver unusable\n");
         return;
     }
     if (target_sq->completion)

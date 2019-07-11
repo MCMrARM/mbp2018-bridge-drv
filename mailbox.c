@@ -23,7 +23,7 @@ int bce_mailbox_send(struct bce_mailbox *mb, u64 msg, u64* recv)
     }
     reinit_completion(&mb->mb_completion);
 
-    pr_debug("bce_mailbox_send: %llx", msg);
+    pr_debug("bce_mailbox_send: %llx\n", msg);
     regb = (u32*) ((u8*) mb->reg_mb + REG_MBOX_OUT_BASE);
     iowrite32((u32) msg, regb);
     iowrite32((u32) (msg >> 32), regb + 1);
@@ -37,7 +37,7 @@ int bce_mailbox_send(struct bce_mailbox *mb, u64 msg, u64* recv)
     }
 
     *recv = mb->mb_result;
-    pr_debug("bce_mailbox_send: reply %llx", *recv);
+    pr_debug("bce_mailbox_send: reply %llx\n", *recv);
 
     atomic_set(&mb->mb_status, 0);
     return 0;
@@ -51,14 +51,14 @@ static int bce_mailbox_retrive_response(struct bce_mailbox *mb)
     u32 res = ioread32((u8*) mb->reg_mb + REG_MBOX_REPLY_COUNTER);
     count = (res >> 20) & 0xf;
     counter = count;
-    pr_debug("bce_mailbox_retrive_response count=%i", count);
+    pr_debug("bce_mailbox_retrive_response count=%i\n", count);
     while (counter--) {
         regb = (u32*) ((u8*) mb->reg_mb + REG_MBOX_REPLY_BASE);
         lo = ioread32(regb);
         hi = ioread32(regb + 1);
         ioread32(regb + 2);
         ioread32(regb + 3);
-        pr_debug("bce_mailbox_retrive_response %llx", ((u64) hi << 32) | lo);
+        pr_debug("bce_mailbox_retrive_response %llx\n", ((u64) hi << 32) | lo);
         mb->mb_result = ((u64) hi << 32) | lo;
     }
     return count > 0 ? 0 : -ENODATA;

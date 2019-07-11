@@ -17,7 +17,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     int status = 0;
     int nvec;
 
-    pr_info("bce: capturing our device");
+    pr_info("bce: capturing our device\n");
 
     if (pci_enable_device(dev))
         return -ENODEV;
@@ -51,7 +51,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     bce->reg_mem_dma = pci_iomap(dev, 2, 0);
 
     if (IS_ERR_OR_NULL(bce->reg_mem_mb) || IS_ERR_OR_NULL(bce->reg_mem_dma)) {
-        dev_warn(&dev->dev, "bce: Failed to pci_iomap required regions");
+        dev_warn(&dev->dev, "bce: Failed to pci_iomap required regions\n");
         goto fail;
     }
 
@@ -62,13 +62,13 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
 
     if ((status = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(37)))) {
-        dev_warn(&dev->dev, "dma: Setting mask failed");
+        dev_warn(&dev->dev, "dma: Setting mask failed\n");
         goto fail_interrupt;
     }
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail_interrupt;
-    pr_info("bce: handshake done");
+    pr_info("bce: handshake done\n");
 
     if ((status = bce_create_command_queues(bce)))
         goto fail_interrupt;
@@ -147,7 +147,7 @@ static int bce_fw_version_handshake(struct bce_device *bce)
         return status;
     if (BCE_MB_TYPE(result) != BCE_MB_SET_FW_PROTOCOL_VERSION ||
         BCE_MB_VALUE(result) != BC_PROTOCOL_VERSION) {
-        pr_err("bce: FW version handshake failed %x:%llx", BCE_MB_TYPE(result), BCE_MB_VALUE(result));
+        pr_err("bce: FW version handshake failed %x:%llx\n", BCE_MB_TYPE(result), BCE_MB_VALUE(result));
         return -EINVAL;
     }
     return 0;
