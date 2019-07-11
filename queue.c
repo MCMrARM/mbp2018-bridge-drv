@@ -61,7 +61,8 @@ static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_compl
 
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 {
-    struct bce_qe_completion *e;e = bce_cq_element(cq, cq->index);
+    struct bce_qe_completion *e;
+    e = bce_cq_element(cq, cq->index);
     if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
         return;
     while (true) {
@@ -162,7 +163,9 @@ void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_s
     }
     cmdq->tres[cmdq->head] = NULL;
     cmdq->head = (cmdq->head + 1) % cmdq->sq->el_count;
-    nospace_notify = cmdq->nospace_cntr--;
+    nospace_notify = cmdq->nospace_cntr;
+    if (nospace_notify)
+        --cmdq->nospace_cntr;
     spin_unlock(&cmdq->lck);
     if (nospace_notify > 0)
         complete(&cmdq->nospace_cmpl);
@@ -172,6 +175,7 @@ static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct b
 {
     void *ret;
     init_completion(&res->cmpl);
+    mb();
 
     spin_lock(&cmdq->lck);
     while ((cmdq->tail + 1) % cmdq->sq->el_count == cmdq->head) { // No free elements

@@ -59,7 +59,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")))
         goto fail;
-    if ((status = pci_request_irq(dev, 4, bce_handle_dma_irq, NULL, dev, "bce_dma")))
+    if ((status = pci_request_irq(dev, 4, NULL, bce_handle_dma_irq, dev, "bce_dma")))
         goto fail_interrupt_0;
 
     if ((status = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(37)))) {
