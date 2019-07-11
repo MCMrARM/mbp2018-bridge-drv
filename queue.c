@@ -161,7 +161,7 @@ void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_s
         pr_err("bce: Unexpected command queue completion\n");
     }
     cmdq->tres[cmdq->head] = NULL;
-    cmdq->head = cmdq->head + 1;
+    cmdq->head = (cmdq->head + 1) % cmdq->sq->el_count;
     nospace_notify = cmdq->nospace_cntr--;
     spin_unlock(&cmdq->lck);
     if (nospace_notify > 0)
