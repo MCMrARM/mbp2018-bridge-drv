@@ -1,7 +1,7 @@
 #include "queue.h"
 #include "pci.h"
 
-struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el_count)
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, int el_count)
 {
     struct bce_queue_cq *q;
     q = kzalloc(sizeof(struct bce_queue_cq), GFP_KERNEL);
@@ -18,7 +18,7 @@ struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el
     return q;
 }
 
-void bce_queue_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
+void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
 {
     cfg->qid = (u16) cq->qid;
     cfg->el_count = (u16) cq->el_count;
@@ -28,13 +28,13 @@ void bce_queue_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *c
     cfg->length = cq->el_count * sizeof(struct bce_qe_completion);
 }
 
-void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q)
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q)
 {
     dma_free_coherent(&dev->pci->dev, q->el_count * sizeof(struct bce_qe_completion), q->data, q->dma_handle);
     kfree(q);
 }
 
-static void bce_queue_handle_completion(struct bce_device *dev, struct bce_qe_completion *e)
+static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_completion *e)
 {
     struct bce_queue *target;
     struct bce_queue_sq *target_sq;
@@ -48,23 +48,23 @@ static void bce_queue_handle_completion(struct bce_device *dev, struct bce_qe_co
         return;
     }
     target_sq = (struct bce_queue_sq *) target;
-    if (target_sq->expected_completion_index != e->completion_index) {
+    if (target_sq->head != e->completion_index) {
         pr_err("Completion index mismatch; this is likely going to make this driver unusable\n");
         return;
     }
     if (target_sq->completion)
         target_sq->completion(target_sq, e->completion_index, e->status, e->data_size, e->result);
-    target_sq->expected_completion_index = (target_sq->expected_completion_index + 1) % target_sq->el_count;
+    target_sq->head = (target_sq->head + 1) % target_sq->el_count;
 }
 
-void bce_queue_handle_completions(struct bce_device *dev, struct bce_queue_cq *cq)
+void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 {
     while (true) {
-        struct bce_qe_completion *e = bce_queue_cq_element(cq, cq->index);
+        struct bce_qe_completion *e = bce_cq_element(cq, cq->index);
         if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
             break;
         mb();
-        bce_queue_handle_completion(dev, e);
+        bce_handle_cq_completion(dev, e);
         mb();
         e->flags = 0;
         ++cq->index;

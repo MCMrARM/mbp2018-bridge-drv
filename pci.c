@@ -100,13 +100,13 @@ static int bce_create_command_queues(struct bce_device *bce)
 {
     struct bce_queue_memcfg *cfg;
 
-    bce->cmd_cq = bce_queue_create_cq(bce, 0, 0x20);
+    bce->cmd_cq = bce_create_cq(bce, 0, 0x20);
     if (bce->cmd_cq == NULL)
         return -ENOMEM;
     bce->queues[0] = (struct bce_queue *) bce->cmd_cq;
 
     cfg = kzalloc(sizeof(struct bce_queue_memcfg), GFP_KERNEL);
-    bce_queue_get_cq_memcfg(bce->cmd_cq, cfg);
+    bce_get_cq_memcfg(bce->cmd_cq, cfg);
     bce_register_command_queue(bce, cfg, 0);
     kfree(cfg);
 
@@ -115,9 +115,9 @@ static int bce_create_command_queues(struct bce_device *bce)
 
 static void bce_free_command_queues(struct bce_device *bce)
 {
+    bce_destroy_cq(bce, bce->cmd_cq);
     bce->cmd_cq = NULL;
     bce->queues[0] = NULL;
-    kfree(bce->cmd_cq);
 }
 
 static irqreturn_t bce_handle_mb_irq(int irq, void *dev)
@@ -133,7 +133,7 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev)
     struct bce_device *bce = pci_get_drvdata(dev);
     for (i = 0; i < BCE_MAX_QUEUE_COUNT; i++)
         if (bce->queues[i] && bce->queues[i]->type == BCE_QUEUE_CQ)
-            bce_queue_handle_completions(bce, (struct bce_queue_cq *) bce->queues[i]);
+            bce_handle_cq_completions(bce, (struct bce_queue_cq *) bce->queues[i]);
     return IRQ_HANDLED;
 }
 

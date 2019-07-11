@@ -22,6 +22,8 @@ struct bce_queue_cq {
 
     int index;
 };
+struct bce_queue_sq;
+typedef void (*bce_sq_completion)(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
 struct bce_queue_sq {
     int qid;
     int type;
@@ -29,10 +31,8 @@ struct bce_queue_sq {
     int el_count;
     void *data;
 
-    int head, tail;
-
-    u32 expected_completion_index;
-    void (*completion)(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
+    u32 head, tail;
+    bce_sq_completion completion;
 };
 
 struct bce_queue_memcfg {
@@ -63,17 +63,17 @@ struct bce_qe_completion {
     ushort flags;  // bce_qe_completion_flags
 };
 
-static __always_inline void *bce_queue_sq_element(struct bce_queue_sq *q, int i) {
+static __always_inline void *bce_sq_element(struct bce_queue_sq *q, int i) {
     return (void *) ((u8 *) q->data + q->el_size * i);
 }
-static __always_inline void *bce_queue_cq_element(struct bce_queue_cq *q, int i) {
+static __always_inline void *bce_cq_element(struct bce_queue_cq *q, int i) {
     return (void *) ((struct bce_qe_completion *) q->data + i);
 }
 
-struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el_count);
-void bce_queue_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
-void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q);
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, int el_count);
+void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q);
 
-void bce_queue_handle_completions(struct bce_device *dev, struct bce_queue_cq *cq);
+void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq);
 
 #endif //BCEDRIVER_MAILBOX_H
