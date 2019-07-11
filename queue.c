@@ -73,7 +73,7 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
         bce_handle_cq_completion(dev, e);
         mb();
         e->flags = 0;
-        ++cq->index;
+        cq->index = (cq->index + 1) % cq->el_count;
     }
     iowrite32(cq->index, (u32 *) ((u8 *) dev->reg_mem_dma +  REG_DOORBELL_BASE) + cq->qid);
 }
