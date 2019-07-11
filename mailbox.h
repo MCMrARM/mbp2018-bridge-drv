@@ -13,10 +13,13 @@ struct bce_mailbox {
 };
 
 enum bce_message_type {
-    BCE_MB_SET_FW_PROTOCOL_VERSION = 0xC
+    BCE_MB_REGISTER_COMMAND_SQ = 0x7,          // to-device
+    BCE_MB_REGISTER_COMMAND_CQ = 0x8,          // to-device
+    BCE_MB_REGISTER_COMMAND_QUEUE_REPLY = 0xA, // to-host
+    BCE_MB_SET_FW_PROTOCOL_VERSION = 0xC       // both
 };
 
-#define BCE_MB_MSG(type, value) (((u64) type << 58) | (value & 0x3FFFFFFFFFFFFFFLL))
+#define BCE_MB_MSG(type, value) (((u64) (type) << 58) | (value & 0x3FFFFFFFFFFFFFFLL))
 #define BCE_MB_TYPE(v) ((u32) (v >> 58))
 #define BCE_MB_VALUE(v) (v & 0x3FFFFFFFFFFFFFFLL)
 

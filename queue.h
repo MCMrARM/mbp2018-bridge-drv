@@ -35,6 +35,14 @@ struct bce_queue_sq {
     void (*completion)(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
 };
 
+struct bce_queue_memcfg {
+    u16 qid;
+    u16 el_count;
+    u16 vector_or_cq;
+    u16 _pad;
+    u64 addr;
+    size_t length;
+};
 
 enum bce_qe_completion_status {
     BCE_COMPLETION_SUCCESS = 0,
@@ -63,6 +71,7 @@ static __always_inline void *bce_queue_cq_element(struct bce_queue_cq *q, int i)
 }
 
 struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el_count);
+void bce_queue_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
 void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q);
 
 void bce_queue_handle_completions(struct bce_device *dev, struct bce_queue_cq *cq);

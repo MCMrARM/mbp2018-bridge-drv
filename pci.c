@@ -4,9 +4,12 @@
 static dev_t bce_chrdev;
 static struct class *bce_class;
 
+static int bce_create_command_queues(struct bce_device *bce);
+static void bce_free_command_queues(struct bce_device *bce);
 static irqreturn_t bce_handle_mb_irq(int irq, void *dev);
 static irqreturn_t bce_handle_dma_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
+static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_memcfg *cfg, int is_sq);
 
 static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -48,7 +51,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     bce->reg_mem_dma = pci_iomap(dev, 2, 0);
 
     if (IS_ERR_OR_NULL(bce->reg_mem_mb) || IS_ERR_OR_NULL(bce->reg_mem_dma)) {
-        dev_warn(dev->dev, "bce: Failed to pci_iomap required regions");
+        dev_warn(&dev->dev, "bce: Failed to pci_iomap required regions");
         goto fail;
     }
 
@@ -58,15 +61,18 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         (status = pci_request_irq(dev, 0, bce_handle_dma_irq, NULL, dev, "bce_dma")))
         goto fail_interrupt;
 
-    if ((status = dma_set_mask_and_coherent(dev->dev, DMA_BIT_MASK(37)))) {
-        dev_warn(dev->dev, "dma: Setting mask failed");
+    if ((status = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(37)))) {
+        dev_warn(&dev->dev, "dma: Setting mask failed");
         goto fail_interrupt;
     }
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail_interrupt;
+    pr_info("bce: handshake done");
 
-    pr_info("bce: device probe success");
+    if ((status = bce_create_command_queues(bce)))
+        goto fail_interrupt;
+
     return 0;
 
 fail_interrupt:
@@ -90,6 +96,30 @@ fail:
     return status;
 }
 
+static int bce_create_command_queues(struct bce_device *bce)
+{
+    struct bce_queue_memcfg *cfg;
+
+    bce->cmd_cq = bce_queue_create_cq(bce, 0, 0x20);
+    if (bce->cmd_cq == NULL)
+        return -ENOMEM;
+    bce->queues[0] = (struct bce_queue *) bce->cmd_cq;
+
+    cfg = kzalloc(sizeof(struct bce_queue_memcfg), GFP_KERNEL);
+    bce_queue_get_cq_memcfg(bce->cmd_cq, cfg);
+    bce_register_command_queue(bce, cfg, 0);
+    kfree(cfg);
+
+    return 0;
+}
+
+static void bce_free_command_queues(struct bce_device *bce)
+{
+    bce->cmd_cq = NULL;
+    bce->queues[0] = NULL;
+    kfree(bce->cmd_cq);
+}
+
 static irqreturn_t bce_handle_mb_irq(int irq, void *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
@@ -107,7 +137,8 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev)
     return IRQ_HANDLED;
 }
 
-static int bce_fw_version_handshake(struct bce_device *bce) {
+static int bce_fw_version_handshake(struct bce_device *bce)
+{
     u64 result;
     int status;
 
@@ -116,9 +147,28 @@ static int bce_fw_version_handshake(struct bce_device *bce) {
         return status;
     if (BCE_MB_TYPE(result) != BCE_MB_SET_FW_PROTOCOL_VERSION ||
         BCE_MB_VALUE(result) != BC_PROTOCOL_VERSION) {
-        pr_info("bce: FW version handshake failed %x:%llx", BCE_MB_TYPE(result), BCE_MB_VALUE(result));
+        pr_err("bce: FW version handshake failed %x:%llx", BCE_MB_TYPE(result), BCE_MB_VALUE(result));
         return -EINVAL;
     }
+    return 0;
+}
+
+static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_memcfg *cfg, int is_sq)
+{
+    int status;
+    int cmd_type;
+    u64 result;
+    // OS X uses an bidirectional direction, but that's not really needed
+    dma_addr_t a = dma_map_single(&bce->pci->dev, cfg, sizeof(struct bce_queue_memcfg), DMA_TO_DEVICE);
+    if (dma_mapping_error(&bce->pci->dev, a))
+        return -ENOMEM;
+    cmd_type = is_sq ? BCE_MB_REGISTER_COMMAND_SQ : BCE_MB_REGISTER_COMMAND_CQ;
+    status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(cmd_type, a), &result);
+    dma_unmap_single(&bce->pci->dev, a, sizeof(struct bce_queue_memcfg), DMA_TO_DEVICE);
+    if (status)
+        return status;
+    if (BCE_MB_TYPE(result) != BCE_MB_SET_FW_PROTOCOL_VERSION)
+        return -EINVAL;
     return 0;
 }
 
@@ -127,6 +177,8 @@ static void bce_remove(struct pci_dev *dev)
     struct bce_device *bce = pci_get_drvdata(dev);
 
     pci_free_irq(dev, 0, dev);
+    pci_free_irq(dev, 4, dev);
+    bce_free_command_queues(bce);
     pci_iounmap(dev, bce->reg_mem_mb);
     pci_iounmap(dev, bce->reg_mem_dma);
     device_destroy(bce_class, bce->devt);

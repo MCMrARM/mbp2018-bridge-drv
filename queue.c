@@ -4,7 +4,7 @@
 struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el_count)
 {
     struct bce_queue_cq *q;
-    q = kzalloc(sizeof(bce_queue_cq), GFP_KERNEL);
+    q = kzalloc(sizeof(struct bce_queue_cq), GFP_KERNEL);
     q->qid = qid;
     q->type = BCE_QUEUE_CQ;
     q->el_count = el_count;
@@ -18,7 +18,18 @@ struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el
     return q;
 }
 
-void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q) {
+void bce_queue_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
+{
+    cfg->qid = (u16) cq->qid;
+    cfg->el_count = (u16) cq->el_count;
+    cfg->vector_or_cq = 0;
+    cfg->_pad = 0;
+    cfg->addr = cq->dma_handle;
+    cfg->length = cq->el_count * sizeof(struct bce_qe_completion);
+}
+
+void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q)
+{
     dma_free_coherent(&dev->pci->dev, q->el_count * sizeof(struct bce_qe_completion), q->data, q->dma_handle);
     kfree(q);
 }
