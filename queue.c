@@ -48,13 +48,13 @@ static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_compl
         return;
     }
     target_sq = (struct bce_queue_sq *) target;
-    if (target_sq->head != e->completion_index) {
+    if (target_sq->expected_completion_idx != e->completion_index) {
         pr_err("Completion index mismatch; this is likely going to make this driver unusable\n");
         return;
     }
     if (target_sq->completion)
         target_sq->completion(target_sq, e->completion_index, e->status, e->data_size, e->result);
-    target_sq->head = (target_sq->head + 1) % target_sq->el_count;
+    target_sq->expected_completion_idx = (target_sq->expected_completion_idx + 1) % target_sq->el_count;
 }
 
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
@@ -104,4 +104,116 @@ void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
 {
     dma_free_coherent(&dev->pci->dev, sq->el_count * sq->el_size, sq->data, sq->dma_handle);
     kfree(sq);
+}
+
+
+static void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
+
+struct bce_queue_cmdq *bce_create_cmdq(struct bce_device *dev, int qid, u32 el_count)
+{
+    struct bce_queue_cmdq *q;
+    q = kzalloc(sizeof(struct bce_queue_cmdq), GFP_KERNEL);
+    q->sq = bce_create_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion);
+    if (!q->sq) {
+        kfree(q);
+        return NULL;
+    }
+    spin_lock_init(&q->lck);
+    q->tres = kzalloc(sizeof(struct bce_queue_cmdq_result_el*) * el_count, GFP_KERNEL);
+    if (!q->tres) {
+        kfree(q);
+        return NULL;
+    }
+    return q;
+}
+
+void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result)
+{
+    int nospace_notify;
+    struct bce_queue_cmdq_result_el *el;
+    struct bce_queue_cmdq *cmdq = q->userdata;
+    spin_lock(&cmdq->lck);
+    el = cmdq->tres[cmdq->head];
+    if (el) {
+        el->result = result;
+        el->status = status;
+        mb();
+        complete(&el->cmpl);
+    } else {
+        pr_err("bce: Unexpected command queue completion");
+    }
+    cmdq->tres[cmdq->head] = NULL;
+    cmdq->head = cmdq->head + 1;
+    nospace_notify = cmdq->nospace_cntr--;
+    spin_unlock(&cmdq->lck);
+    if (nospace_notify > 0)
+        complete(&cmdq->nospace_cmpl);
+}
+
+static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
+{
+    void *ret;
+    init_completion(&res->cmpl);
+
+    spin_lock(&cmdq->lck);
+    while ((cmdq->tail + 1) % cmdq->sq->el_count == cmdq->head) { // No free elements
+        ++cmdq->nospace_cntr;
+        spin_unlock(&cmdq->lck);
+        wait_for_completion(&cmdq->nospace_cmpl);
+        spin_lock(&cmdq->lck);
+    }
+
+    ret = bce_sq_element(cmdq->sq, cmdq->tail);
+    cmdq->tres[cmdq->tail] = res;
+    cmdq->tail = (cmdq->tail + 1) % cmdq->sq->el_count;
+    return ret;
+}
+
+static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
+{
+    spin_unlock(&cmdq->lck);
+
+    wait_for_completion(&res->cmpl);
+    mb();
+}
+
+u32 bce_cmd_register_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg,
+        const char *name, bool isdirin)
+{
+    struct bce_queue_cmdq_result_el res;
+    struct bce_cmdq_register_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    cmd->cmd = BCE_CMD_REGISTER_MEMORY_QUEUE;
+    cmd->flags = (u16) ((name ? 2 : 0) | (isdirin ? 1 : 0));
+    cmd->qid = cfg->qid;
+    cmd->el_count = cfg->el_count;
+    cmd->vector_or_cq = cfg->vector_or_cq;
+    cmd->name_len = (u16) min(strlen(name), (size_t) 0x20);
+    memcpy(cmd->name, name, cmd->name_len);
+    cmd->addr = cfg->addr;
+    cmd->length = cfg->length;
+
+    bce_cmd_finish(cmdq, &res);
+    return res.status;
+}
+
+u32 bce_cmd_unregister_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid)
+{
+    struct bce_queue_cmdq_result_el res;
+    struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    cmd->cmd = BCE_CMD_UNREGISTER_MEMORY_QUEUE;
+    cmd->flags = 0;
+    cmd->qid = qid;
+    bce_cmd_finish(cmdq, &res);
+    return res.status;
+}
+
+u32 bce_cmd_flush_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid)
+{
+    struct bce_queue_cmdq_result_el res;
+    struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    cmd->cmd = BCE_CMD_FLUSH_MEMORY_QUEUE;
+    cmd->flags = 0;
+    cmd->qid = qid;
+    bce_cmd_finish(cmdq, &res);
+    return res.status;
 }
