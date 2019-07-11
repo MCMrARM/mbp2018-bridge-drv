@@ -1,7 +1,7 @@
 #include "queue.h"
 #include "pci.h"
 
-struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, int el_count)
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count)
 {
     struct bce_queue_cq *q;
     q = kzalloc(sizeof(struct bce_queue_cq), GFP_KERNEL);
@@ -13,7 +13,7 @@ struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, int el_count
     if (!q->data) {
         pr_err("DMA queue memory alloc failed\n");
         kfree(q);
-        return q;
+        return NULL;
     }
     return q;
 }
@@ -28,10 +28,10 @@ void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
     cfg->length = cq->el_count * sizeof(struct bce_qe_completion);
 }
 
-void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q)
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq)
 {
-    dma_free_coherent(&dev->pci->dev, q->el_count * sizeof(struct bce_qe_completion), q->data, q->dma_handle);
-    kfree(q);
+    dma_free_coherent(&dev->pci->dev, cq->el_count * sizeof(struct bce_qe_completion), cq->data, cq->dma_handle);
+    kfree(cq);
 }
 
 static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_completion *e)
@@ -69,4 +69,39 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
         e->flags = 0;
         ++cq->index;
     }
+}
+
+
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count, bce_sq_completion compl)
+{
+    struct bce_queue_sq *q;
+    q = kzalloc(sizeof(struct bce_queue_sq), GFP_KERNEL);
+    q->qid = qid;
+    q->type = BCE_QUEUE_SQ;
+    q->el_size = el_size;
+    q->el_count = el_count;
+    q->data = dma_alloc_coherent(&dev->pci->dev, el_count * el_size,
+                                 &q->dma_handle, GFP_KERNEL);
+    if (!q->data) {
+        pr_err("DMA queue memory alloc failed\n");
+        kfree(q);
+        return NULL;
+    }
+    return q;
+}
+
+void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
+{
+    cfg->qid = (u16) sq->qid;
+    cfg->el_count = (u16) sq->el_count;
+    cfg->vector_or_cq = (u16) cq->qid;
+    cfg->_pad = 0;
+    cfg->addr = sq->dma_handle;
+    cfg->length = sq->el_count * sq->el_size;
+}
+
+void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
+{
+    dma_free_coherent(&dev->pci->dev, sq->el_count * sq->el_size, sq->data, sq->dma_handle);
+    kfree(sq);
 }

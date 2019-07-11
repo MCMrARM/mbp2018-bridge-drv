@@ -4,6 +4,8 @@
 #include <linux/completion.h>
 #include <linux/pci.h>
 
+#define BCE_CMD_SIZE 0x40
+
 struct bce_device;
 
 enum bce_queue_type {
@@ -16,7 +18,7 @@ struct bce_queue {
 struct bce_queue_cq {
     int qid;
     int type;
-    int el_count;
+    u32 el_count;
     dma_addr_t dma_handle;
     void *data;
 
@@ -27,8 +29,9 @@ typedef void (*bce_sq_completion)(struct bce_queue_sq *q, u32 idx, u32 status, u
 struct bce_queue_sq {
     int qid;
     int type;
-    int el_size;
-    int el_count;
+    u32 el_size;
+    u32 el_count;
+    dma_addr_t dma_handle;
     void *data;
 
     u32 head, tail;
@@ -70,10 +73,14 @@ static __always_inline void *bce_cq_element(struct bce_queue_cq *q, int i) {
     return (void *) ((struct bce_qe_completion *) q->data + i);
 }
 
-struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, int el_count);
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count);
 void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
-void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q);
-
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq);
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq);
+
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count, bce_sq_completion compl);
+void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
+void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq);
+
 
 #endif //BCEDRIVER_MAILBOX_H

@@ -70,8 +70,10 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
     pr_info("bce: handshake done\n");
 
-    if ((status = bce_create_command_queues(bce)))
+    if ((status = bce_create_command_queues(bce))) {
+        pr_info("bce: Creating command queues failed\n");
         goto fail_interrupt;
+    }
 
     return 0;
 
@@ -98,24 +100,45 @@ fail:
 
 static int bce_create_command_queues(struct bce_device *bce)
 {
+    int status;
     struct bce_queue_memcfg *cfg;
 
     bce->cmd_cq = bce_create_cq(bce, 0, 0x20);
-    if (bce->cmd_cq == NULL)
-        return -ENOMEM;
+    bce->cmd_sq = bce_create_sq(bce, 1, BCE_CMD_SIZE, 0x20, NULL);
+    if (bce->cmd_cq == NULL || bce->cmd_sq == NULL) {
+        status = -ENOMEM;
+        goto err;
+    }
     bce->queues[0] = (struct bce_queue *) bce->cmd_cq;
+    bce->queues[1] = (struct bce_queue *) bce->cmd_sq;
 
     cfg = kzalloc(sizeof(struct bce_queue_memcfg), GFP_KERNEL);
+    if (!cfg) {
+        status = -ENOMEM;
+        goto err;
+    }
     bce_get_cq_memcfg(bce->cmd_cq, cfg);
-    bce_register_command_queue(bce, cfg, 0);
+    if ((status = bce_register_command_queue(bce, cfg, false)))
+        goto err;
+    bce_get_sq_memcfg(bce->cmd_sq, bce->cmd_cq, cfg);
+    if ((status = bce_register_command_queue(bce, cfg, true)))
+        goto err;
     kfree(cfg);
 
     return 0;
+
+err:
+    if (bce->cmd_cq)
+        bce_destroy_cq(bce, bce->cmd_cq);
+    if (bce->cmd_sq)
+        bce_destroy_sq(bce, bce->cmd_sq);
+    return status;
 }
 
 static void bce_free_command_queues(struct bce_device *bce)
 {
     bce_destroy_cq(bce, bce->cmd_cq);
+    bce_destroy_sq(bce, bce->cmd_sq);
     bce->cmd_cq = NULL;
     bce->queues[0] = NULL;
 }
