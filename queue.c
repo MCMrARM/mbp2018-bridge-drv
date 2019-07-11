@@ -17,6 +17,7 @@ struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count
         kfree(q);
         return NULL;
     }
+    q->reg_mem_dma = dev->reg_mem_dma;
     return q;
 }
 
@@ -61,8 +62,11 @@ static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_compl
 
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 {
+    struct bce_qe_completion *e;e = bce_cq_element(cq, cq->index);
+    if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
+        return;
     while (true) {
-        struct bce_qe_completion *e = bce_cq_element(cq, cq->index);
+        e = bce_cq_element(cq, cq->index);
         if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
             break;
         mb();
@@ -71,6 +75,7 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
         e->flags = 0;
         ++cq->index;
     }
+    iowrite32(cq->index, (u32 *) ((u8 *) dev->reg_mem_dma +  REG_DOORBELL_BASE) + cq->qid);
 }
 
 

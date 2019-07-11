@@ -22,7 +22,7 @@ struct bce_queue_cq {
     dma_addr_t dma_handle;
     void *data;
 
-    int index;
+    u32 index;
 };
 struct bce_queue_sq;
 typedef void (*bce_sq_completion)(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
