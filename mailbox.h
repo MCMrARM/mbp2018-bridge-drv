@@ -15,7 +15,7 @@ struct bce_mailbox {
 enum bce_message_type {
     BCE_MB_REGISTER_COMMAND_SQ = 0x7,          // to-device
     BCE_MB_REGISTER_COMMAND_CQ = 0x8,          // to-device
-    BCE_MB_REGISTER_COMMAND_QUEUE_REPLY = 0xA, // to-host
+    BCE_MB_REGISTER_COMMAND_QUEUE_REPLY = 0xB, // to-host
     BCE_MB_SET_FW_PROTOCOL_VERSION = 0xC       // both
 };
 

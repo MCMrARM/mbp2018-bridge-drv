@@ -193,7 +193,7 @@ static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_m
     dma_unmap_single(&bce->pci->dev, a, sizeof(struct bce_queue_memcfg), DMA_TO_DEVICE);
     if (status)
         return status;
-    if (BCE_MB_TYPE(result) != BCE_MB_SET_FW_PROTOCOL_VERSION)
+    if (BCE_MB_TYPE(result) != BCE_MB_REGISTER_COMMAND_QUEUE_REPLY)
         return -EINVAL;
     return 0;
 }
