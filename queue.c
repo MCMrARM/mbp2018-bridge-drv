@@ -17,7 +17,6 @@ struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count
         kfree(q);
         return NULL;
     }
-    q->reg_mem_dma = dev->reg_mem_dma;
     return q;
 }
 
