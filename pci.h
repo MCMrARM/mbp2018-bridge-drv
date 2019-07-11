@@ -16,6 +16,6 @@ struct bce_device {
     struct bce_mailbox mbox;
     struct bce_queue *queues[BCE_MAX_QUEUE_COUNT];
     struct bce_queue_cq *cmd_cq;
-    struct bce_queue_sq *cmd_sq;
+    struct bce_queue_cmdq *cmd_cmdq;
 };
 

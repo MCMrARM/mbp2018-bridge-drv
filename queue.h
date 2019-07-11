@@ -46,6 +46,7 @@ struct bce_queue_cmdq_result_el {
 };
 struct bce_queue_cmdq {
     struct bce_queue_sq *sq;
+    void __iomem *reg_mem_dma;
     struct spinlock lck;
     u32 head, tail;
     int nospace_cntr;
@@ -75,10 +76,10 @@ enum bce_qe_completion_flags {
 struct bce_qe_completion {
     u64 data_size;
     u64 result;
-    u32 qid;
-    u32 completion_index;
-    u32 status; // bce_qe_completion_status
-    u32 flags;  // bce_qe_completion_flags
+    u16 qid;
+    u16 completion_index;
+    u16 status; // bce_qe_completion_status
+    u16 flags;  // bce_qe_completion_flags
 };
 
 enum bce_cmdq_command {
@@ -118,16 +119,16 @@ void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
 void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq);
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq);
 
-struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count, bce_sq_completion compl);
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count,
+        bce_sq_completion compl, void *userdata);
 void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
 void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq);
 
 struct bce_queue_cmdq *bce_create_cmdq(struct bce_device *dev, int qid, u32 el_count);
 void bce_destroy_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq);
 
-u32 bce_cmd_register_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg,
-                           const char *name, bool isdirin);
-u32 bce_cmd_unregister_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid);
-u32 bce_cmd_flush_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid);
+u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirin);
+u32 bce_cmd_unregister_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
+u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
 
 #endif //BCEDRIVER_MAILBOX_H

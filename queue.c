@@ -1,6 +1,8 @@
 #include "queue.h"
 #include "pci.h"
 
+#define REG_DOORBELL_BASE 0x44000
+
 struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count)
 {
     struct bce_queue_cq *q;
@@ -72,7 +74,8 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 }
 
 
-struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count, bce_sq_completion compl)
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count,
+        bce_sq_completion compl, void *userdata)
 {
     struct bce_queue_sq *q;
     q = kzalloc(sizeof(struct bce_queue_sq), GFP_KERNEL);
@@ -82,6 +85,8 @@ struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size,
     q->el_count = el_count;
     q->data = dma_alloc_coherent(&dev->pci->dev, el_count * el_size,
                                  &q->dma_handle, GFP_KERNEL);
+    q->completion = compl;
+    q->userdata = userdata;
     if (!q->data) {
         pr_err("DMA queue memory alloc failed\n");
         kfree(q);
@@ -113,18 +118,27 @@ struct bce_queue_cmdq *bce_create_cmdq(struct bce_device *dev, int qid, u32 el_c
 {
     struct bce_queue_cmdq *q;
     q = kzalloc(sizeof(struct bce_queue_cmdq), GFP_KERNEL);
-    q->sq = bce_create_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion);
+    q->reg_mem_dma = dev->reg_mem_dma;
+    q->sq = bce_create_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion, q);
     if (!q->sq) {
         kfree(q);
         return NULL;
     }
     spin_lock_init(&q->lck);
+    init_completion(&q->nospace_cmpl);
     q->tres = kzalloc(sizeof(struct bce_queue_cmdq_result_el*) * el_count, GFP_KERNEL);
     if (!q->tres) {
         kfree(q);
         return NULL;
     }
     return q;
+}
+
+void bce_destroy_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq)
+{
+    bce_destroy_sq(dev, cmdq->sq);
+    kfree(cmdq->tres);
+    kfree(cmdq);
 }
 
 void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result)
@@ -140,7 +154,7 @@ void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_s
         mb();
         complete(&el->cmpl);
     } else {
-        pr_err("bce: Unexpected command queue completion");
+        pr_err("bce: Unexpected command queue completion\n");
     }
     cmdq->tres[cmdq->head] = NULL;
     cmdq->head = cmdq->head + 1;
@@ -171,14 +185,14 @@ static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct b
 
 static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
 {
+    iowrite32(cmdq->tail, (u32 *) ((u8 *) cmdq->reg_mem_dma +  REG_DOORBELL_BASE) + cmdq->sq->qid);
     spin_unlock(&cmdq->lck);
 
     wait_for_completion(&res->cmpl);
     mb();
 }
 
-u32 bce_cmd_register_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg,
-        const char *name, bool isdirin)
+u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirin)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_register_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
@@ -187,8 +201,12 @@ u32 bce_cmd_register_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, 
     cmd->qid = cfg->qid;
     cmd->el_count = cfg->el_count;
     cmd->vector_or_cq = cfg->vector_or_cq;
-    cmd->name_len = (u16) min(strlen(name), (size_t) 0x20);
-    memcpy(cmd->name, name, cmd->name_len);
+    if (name) {
+        cmd->name_len = (u16) min(strlen(name), (size_t) 0x20);
+        memcpy(cmd->name, name, cmd->name_len);
+    } else {
+        cmd->name_len = 0;
+    }
     cmd->addr = cfg->addr;
     cmd->length = cfg->length;
 
@@ -196,7 +214,7 @@ u32 bce_cmd_register_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, 
     return res.status;
 }
 
-u32 bce_cmd_unregister_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid)
+u32 bce_cmd_unregister_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
@@ -207,7 +225,7 @@ u32 bce_cmd_unregister_memory_queue(struct bce_device *dev, struct bce_queue_cmd
     return res.status;
 }
 
-u32 bce_cmd_flush_memory_queue(struct bce_device *dev, struct bce_queue_cmdq *cmdq, u16 qid)
+u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
