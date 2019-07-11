@@ -48,7 +48,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     bce->reg_mem_dma = pci_iomap(dev, 2, 0);
 
     if (IS_ERR_OR_NULL(bce->reg_mem_mb) || IS_ERR_OR_NULL(bce->reg_mem_dma)) {
-        pr_err("bce: Failed to pci_iomap required regions");
+        dev_warn(dev->dev, "bce: Failed to pci_iomap required regions");
         goto fail;
     }
 
@@ -57,6 +57,11 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")) ||
         (status = pci_request_irq(dev, 0, bce_handle_dma_irq, NULL, dev, "bce_dma")))
         goto fail_interrupt;
+
+    if ((status = dma_set_mask_and_coherent(dev->dev, DMA_BIT_MASK(37)))) {
+        dev_warn(dev->dev, "dma: Setting mask failed");
+        goto fail_interrupt;
+    }
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail_interrupt;

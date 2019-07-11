@@ -10,17 +10,23 @@ enum bce_queue_type {
     BCE_QUEUE_CQ, BCE_QUEUE_SQ
 };
 struct bce_queue {
+    int qid;
     int type;
 };
 struct bce_queue_cq {
+    int qid;
     int type;
+    int el_count;
+    dma_addr_t dma_handle;
     void *data;
 
     int index;
 };
 struct bce_queue_sq {
+    int qid;
     int type;
     int el_size;
+    int el_count;
     void *data;
 
     int head, tail;
@@ -55,6 +61,9 @@ static __always_inline void *bce_queue_sq_element(struct bce_queue_sq *q, int i)
 static __always_inline void *bce_queue_cq_element(struct bce_queue_cq *q, int i) {
     return (void *) ((struct bce_qe_completion *) q->data + i);
 }
+
+struct bce_queue_cq *bce_queue_create_cq(struct bce_device *dev, int qid, int el_count);
+void bce_queue_destroy_cq(struct bce_device *dev, struct bce_queue_cq *q);
 
 void bce_queue_handle_completions(struct bce_device *dev, struct bce_queue_cq *cq);
 
