@@ -5,6 +5,7 @@ static dev_t bce_chrdev;
 static struct class *bce_class;
 
 static irqreturn_t bce_handle_mb_irq(int irq, void *dev);
+static irqreturn_t bce_handle_dma_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
 
 static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
@@ -53,8 +54,8 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
 
-    status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox");
-    if (status)
+    if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")) ||
+        (status = pci_request_irq(dev, 0, bce_handle_dma_irq, NULL, dev, "bce_dma")))
         goto fail_interrupt;
 
     if ((status = bce_fw_version_handshake(bce)))
@@ -88,6 +89,16 @@ static irqreturn_t bce_handle_mb_irq(int irq, void *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
     bce_mailbox_handle_interrupt(&bce->mbox);
+    return IRQ_HANDLED;
+}
+
+static irqreturn_t bce_handle_dma_irq(int irq, void *dev)
+{
+    int i;
+    struct bce_device *bce = pci_get_drvdata(dev);
+    for (i = 0; i < BCE_MAX_QUEUE_COUNT; i++)
+        if (bce->queues[i] && bce->queues[i]->type == BCE_QUEUE_CQ)
+            bce_queue_handle_completions(bce, (struct bce_queue_cq *) bce->queues[i]);
     return IRQ_HANDLED;
 }
 
