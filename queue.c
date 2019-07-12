@@ -36,10 +36,11 @@ void bce_free_cq(struct bce_device *dev, struct bce_queue_cq *cq)
     kfree(cq);
 }
 
-static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_completion *e)
+static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_completion *e, size_t *ce)
 {
     struct bce_queue *target;
     struct bce_queue_sq *target_sq;
+    struct bce_sq_completion_data *cmpl;
     if (e->qid >= BCE_MAX_QUEUE_COUNT) {
         pr_err("Device sent a response for qid (%u) >= BCE_MAX_QUEUE_COUNT\n", e->qid);
         return;
@@ -50,32 +51,47 @@ static void bce_handle_cq_completion(struct bce_device *dev, struct bce_qe_compl
         return;
     }
     target_sq = (struct bce_queue_sq *) target;
-    if (target_sq->expected_completion_idx != e->completion_index) {
+    if (target_sq->completion_tail != e->completion_index) {
         pr_err("Completion index mismatch; this is likely going to make this driver unusable\n");
         return;
     }
-    if (target_sq->completion)
-        target_sq->completion(target_sq, e->completion_index, e->status, e->data_size, e->result);
-    target_sq->expected_completion_idx = (target_sq->expected_completion_idx + 1) % target_sq->el_count;
+    if (!target_sq->has_pending_completions) {
+        target_sq->has_pending_completions = true;
+        dev->int_sq_list[(*ce)++] = target_sq;
+    }
+    cmpl = &target_sq->completion_data[e->completion_index];
+    cmpl->status = e->status;
+    cmpl->data_size = e->data_size;
+    cmpl->result = e->result;
+    wmb();
+    target_sq->completion_tail = (target_sq->completion_tail + 1) % target_sq->el_count;
 }
 
 void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 {
+    size_t ce = 0;
     struct bce_qe_completion *e;
+    struct bce_queue_sq *sq;
     e = bce_cq_element(cq, cq->index);
     if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
         return;
+    mb();
     while (true) {
         e = bce_cq_element(cq, cq->index);
         if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
             break;
-        mb();
-        bce_handle_cq_completion(dev, e);
-        mb();
+        bce_handle_cq_completion(dev, e, &ce);
         e->flags = 0;
         cq->index = (cq->index + 1) % cq->el_count;
     }
+    mb();
     iowrite32(cq->index, (u32 *) ((u8 *) dev->reg_mem_dma +  REG_DOORBELL_BASE) + cq->qid);
+    while (ce) {
+        --ce;
+        sq = dev->int_sq_list[ce];
+        sq->completion(sq);
+        sq->has_pending_completions = false;
+    }
 }
 
 
@@ -92,6 +108,7 @@ struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, 
                                  &q->dma_handle, GFP_KERNEL);
     q->completion = compl;
     q->userdata = userdata;
+    q->completion_data = kzalloc(sizeof(struct bce_sq_completion_data) * el_count, GFP_KERNEL);
     if (!q->data) {
         pr_err("DMA queue memory alloc failed\n");
         kfree(q);
@@ -117,7 +134,7 @@ void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq)
 }
 
 
-static void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
+static void bce_cmdq_completion(struct bce_queue_sq *q);
 
 struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count)
 {
@@ -146,29 +163,33 @@ void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq)
     kfree(cmdq);
 }
 
-void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result)
+void bce_cmdq_completion(struct bce_queue_sq *q)
 {
     int nospace_notify;
     struct bce_queue_cmdq_result_el *el;
     struct bce_queue_cmdq *cmdq = q->userdata;
-    spin_lock(&cmdq->lck);
-    el = cmdq->tres[cmdq->head];
-    if (el) {
-        el->result = result;
-        el->status = status;
-        mb();
-        complete(&el->cmpl);
-    } else {
-        pr_err("bce: Unexpected command queue completion\n");
+    struct bce_sq_completion_data *result;
+
+    while ((result = bce_next_completion(q))) {
+        spin_lock(&cmdq->lck);
+        el = cmdq->tres[cmdq->head];
+        if (el) {
+            el->result = result->result;
+            el->status = result->status;
+            mb();
+            complete(&el->cmpl);
+        } else {
+            pr_err("bce: Unexpected command queue completion\n");
+        }
+        cmdq->tres[cmdq->head] = NULL;
+        cmdq->head = (cmdq->head + 1) % cmdq->sq->el_count;
+        nospace_notify = cmdq->nospace_cntr;
+        if (nospace_notify)
+            --cmdq->nospace_cntr;
+        spin_unlock(&cmdq->lck);
+        if (nospace_notify > 0)
+            complete(&cmdq->nospace_cmpl);
     }
-    cmdq->tres[cmdq->head] = NULL;
-    cmdq->head = (cmdq->head + 1) % cmdq->sq->el_count;
-    nospace_notify = cmdq->nospace_cntr;
-    if (nospace_notify)
-        --cmdq->nospace_cntr;
-    spin_unlock(&cmdq->lck);
-    if (nospace_notify > 0)
-        complete(&cmdq->nospace_cmpl);
 }
 
 static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)

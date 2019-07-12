@@ -25,7 +25,12 @@ struct bce_queue_cq {
     u32 index;
 };
 struct bce_queue_sq;
-typedef void (*bce_sq_completion)(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
+typedef void (*bce_sq_completion)(struct bce_queue_sq *q);
+struct bce_sq_completion_data {
+    u32 status;
+    u64 data_size;
+    u64 result;
+};
 struct bce_queue_sq {
     int qid;
     int type;
@@ -35,7 +40,9 @@ struct bce_queue_sq {
     void *data;
     void *userdata;
 
-    u32 expected_completion_idx;
+    u32 completion_cidx, completion_tail;
+    struct bce_sq_completion_data *completion_data;
+    bool has_pending_completions;
     bce_sq_completion completion;
 };
 
@@ -112,6 +119,14 @@ static __always_inline void *bce_sq_element(struct bce_queue_sq *q, int i) {
 }
 static __always_inline void *bce_cq_element(struct bce_queue_cq *q, int i) {
     return (void *) ((struct bce_qe_completion *) q->data + i);
+}
+
+static __always_inline struct bce_sq_completion_data *bce_next_completion(struct bce_queue_sq *sq) {
+    rmb();
+    if (sq->completion_cidx == sq->completion_tail)
+        return NULL;
+    sq->completion_cidx = (sq->completion_cidx + 1) % sq->el_count;
+    return &sq->completion_data[sq->completion_cidx];
 }
 
 struct bce_queue_cq *bce_alloc_cq(struct bce_device *dev, int qid, u32 el_count);
