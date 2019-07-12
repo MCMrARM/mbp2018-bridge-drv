@@ -15,6 +15,7 @@ int bce_map_dma_buffer(struct device *dev, struct bce_dma_buffer *buf, struct sg
 
     buf->direction = dir;
     buf->scatterlist = scatterlist;
+    buf->seglist_hostinfo = NULL;
 
     cnt = dma_map_sg(dev, buf->scatterlist.sgl, buf->scatterlist.nents, dir);
     if (cnt != buf->scatterlist.nents) {
@@ -58,6 +59,7 @@ int bce_map_dma_buffer_km(struct device *dev, struct bce_dma_buffer *buf, void *
         sg_free_table(&scatterlist);
         return status;
     }
+    sg_set_buf(scatterlist.sgl, data, (uint) len);
     if ((status = bce_map_dma_buffer(dev, buf, scatterlist, dir))) {
         sg_free_table(&scatterlist);
         return status;
