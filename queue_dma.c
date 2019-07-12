@@ -140,6 +140,7 @@ static struct bce_segment_list_element_hostinfo *bce_map_segment_list(
                 out->page_start = (void *) ptr;
                 out->page_count = 1;
                 out->dma_start = DMA_MAPPING_ERROR;
+                out->next = NULL;
             }
             pptr = ptr;
         }
