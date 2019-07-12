@@ -3,7 +3,7 @@
 
 #define REG_DOORBELL_BASE 0x44000
 
-struct bce_queue_cq *bce_create_cq(struct bce_device *dev, int qid, u32 el_count)
+struct bce_queue_cq *bce_alloc_cq(struct bce_device *dev, int qid, u32 el_count)
 {
     struct bce_queue_cq *q;
     q = kzalloc(sizeof(struct bce_queue_cq), GFP_KERNEL);
@@ -30,7 +30,7 @@ void bce_get_cq_memcfg(struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg)
     cfg->length = cq->el_count * sizeof(struct bce_qe_completion);
 }
 
-void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq)
+void bce_free_cq(struct bce_device *dev, struct bce_queue_cq *cq)
 {
     dma_free_coherent(&dev->pci->dev, cq->el_count * sizeof(struct bce_qe_completion), cq->data, cq->dma_handle);
     kfree(cq);
@@ -79,7 +79,7 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
 }
 
 
-struct bce_queue_sq *bce_create_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count,
+struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, u32 el_count,
         bce_sq_completion compl, void *userdata)
 {
     struct bce_queue_sq *q;
@@ -110,7 +110,7 @@ void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct 
     cfg->length = sq->el_count * sq->el_size;
 }
 
-void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
+void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq)
 {
     dma_free_coherent(&dev->pci->dev, sq->el_count * sq->el_size, sq->data, sq->dma_handle);
     kfree(sq);
@@ -119,12 +119,12 @@ void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
 
 static void bce_cmdq_completion(struct bce_queue_sq *q, u32 idx, u32 status, u64 data_size, u64 result);
 
-struct bce_queue_cmdq *bce_create_cmdq(struct bce_device *dev, int qid, u32 el_count)
+struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count)
 {
     struct bce_queue_cmdq *q;
     q = kzalloc(sizeof(struct bce_queue_cmdq), GFP_KERNEL);
     q->reg_mem_dma = dev->reg_mem_dma;
-    q->sq = bce_create_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion, q);
+    q->sq = bce_alloc_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion, q);
     if (!q->sq) {
         kfree(q);
         return NULL;
@@ -139,9 +139,9 @@ struct bce_queue_cmdq *bce_create_cmdq(struct bce_device *dev, int qid, u32 el_c
     return q;
 }
 
-void bce_destroy_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq)
+void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq)
 {
-    bce_destroy_sq(dev, cmdq->sq);
+    bce_free_sq(dev, cmdq->sq);
     kfree(cmdq->tres);
     kfree(cmdq);
 }

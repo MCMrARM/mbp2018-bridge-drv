@@ -106,8 +106,8 @@ static int bce_create_command_queues(struct bce_device *bce)
     int status;
     struct bce_queue_memcfg *cfg;
 
-    bce->cmd_cq = bce_create_cq(bce, 0, 0x20);
-    bce->cmd_cmdq = bce_create_cmdq(bce, 1, 0x20);
+    bce->cmd_cq = bce_alloc_cq(bce, 0, 0x20);
+    bce->cmd_cmdq = bce_alloc_cmdq(bce, 1, 0x20);
     if (bce->cmd_cq == NULL || bce->cmd_cmdq == NULL) {
         status = -ENOMEM;
         goto err;
@@ -132,16 +132,16 @@ static int bce_create_command_queues(struct bce_device *bce)
 
 err:
     if (bce->cmd_cq)
-        bce_destroy_cq(bce, bce->cmd_cq);
+        bce_free_cq(bce, bce->cmd_cq);
     if (bce->cmd_cmdq)
-        bce_destroy_cmdq(bce, bce->cmd_cmdq);
+        bce_free_cmdq(bce, bce->cmd_cmdq);
     return status;
 }
 
 static void bce_free_command_queues(struct bce_device *bce)
 {
-    bce_destroy_cq(bce, bce->cmd_cq);
-    bce_destroy_cmdq(bce, bce->cmd_cmdq);
+    bce_free_cq(bce, bce->cmd_cq);
+    bce_free_cmdq(bce, bce->cmd_cmdq);
     bce->cmd_cq = NULL;
     bce->queues[0] = NULL;
 }
