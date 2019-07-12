@@ -281,8 +281,10 @@ struct bce_queue_cq *bce_create_cq(struct bce_device *dev, u32 el_count)
     if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, NULL, false) != 0) {
         pr_err("bce: CQ registration failed (%i)", qid);
         bce_free_cq(dev, cq);
+        ida_simple_remove(&dev->queue_ida, (uint) qid);
         return NULL;
     }
+    dev->queues[qid] = (struct bce_queue *) cq;
     return cq;
 }
 
@@ -308,8 +310,10 @@ struct bce_queue_sq *bce_create_sq(struct bce_device *dev, struct bce_queue_cq *
     if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, name, direction == DMA_FROM_DEVICE) != 0) {
         pr_err("bce: SQ registration failed (%i)", qid);
         bce_free_sq(dev, sq);
+        ida_simple_remove(&dev->queue_ida, (uint) qid);
         return NULL;
     }
+    dev->queues[qid] = (struct bce_queue *) sq;
     return sq;
 }
 
