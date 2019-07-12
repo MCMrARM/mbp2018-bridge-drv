@@ -1,6 +1,7 @@
 #include "queue_dma.h"
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include "queue.h"
 
 static int bce_alloc_scatterlist_from_vm(struct sg_table *tbl, void *data, size_t len);
 static struct bce_segment_list_element_hostinfo *bce_map_segment_list(
@@ -184,4 +185,34 @@ static void bce_unmap_segement_list(struct device *dev, struct bce_segment_list_
         kfree(list);
         list = next;
     }
+}
+
+int bce_fill_submission(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length)
+{
+    struct bce_segment_list_element_hostinfo *seg;
+    struct bce_segment_list_header *seg_header;
+
+    seg = buf->seglist_hostinfo;
+    if (!seg) {
+        element->addr = buf->scatterlist.sgl->dma_address + offset;
+        element->length = length;
+        element->segl_addr = 0;
+        element->segl_length = 0;
+        return 0;
+    }
+
+    while (seg) {
+        seg_header = seg->page_start;
+        if (offset <= seg_header->data_size)
+            break;
+        offset -= seg_header->data_size;
+        seg = seg->next;
+    }
+    if (!seg)
+        return -EINVAL;
+    element->addr = offset;
+    element->length = buf->scatterlist.sgl->dma_length;
+    element->segl_addr = seg->dma_start;
+    element->segl_length = seg->page_count * PAGE_SIZE;
+    return 0;
 }

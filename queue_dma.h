@@ -3,6 +3,8 @@
 
 #include <linux/pci.h>
 
+struct bce_qe_submission;
+
 struct bce_segment_list_header {
     u64 element_count;
     u64 data_size;
@@ -42,5 +44,7 @@ int bce_map_dma_buffer_km(struct device *dev, struct bce_dma_buffer *buf, void *
                           enum dma_data_direction dir);
 
 void bce_unmap_dma_buffer(struct device *dev, struct bce_dma_buffer *buf);
+
+int bce_fill_submission(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length);
 
 #endif //BCE_QUEUE_DMA_H
