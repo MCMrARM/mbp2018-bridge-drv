@@ -89,6 +89,14 @@ struct bce_qe_completion {
     u16 flags;  // bce_qe_completion_flags
 };
 
+struct bce_qe_submission {
+    u64 addr;
+    u64 length;
+
+    u64 segl_addr;
+    u64 segl_length;
+};
+
 enum bce_cmdq_command {
     BCE_CMD_REGISTER_MEMORY_QUEUE = 0x20,
     BCE_CMD_UNREGISTER_MEMORY_QUEUE = 0x30,
@@ -145,5 +153,14 @@ void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq);
 u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirin);
 u32 bce_cmd_unregister_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
 u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
+
+
+/* User API - Creates and registers the queue */
+
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, u32 el_count);
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, struct bce_queue_cq *cq, const char *name, u32 el_count,
+        int direction, bce_sq_completion compl, void *userdata);
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq);
+void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq);
 
 #endif //BCEDRIVER_MAILBOX_H

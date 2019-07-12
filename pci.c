@@ -57,6 +57,8 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
 
+    ida_init(&bce->queue_ida);
+
     if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")))
         goto fail;
     if ((status = pci_request_irq(dev, 4, NULL, bce_handle_dma_irq, dev, "bce_dma")))

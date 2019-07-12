@@ -1,11 +1,15 @@
 #pragma once
 
 #include <linux/pci.h>
+#include <linux/spinlock.h>
 #include "mailbox.h"
 #include "queue.h"
 
 #define BC_PROTOCOL_VERSION 0x20001
 #define BCE_MAX_QUEUE_COUNT 0x100
+
+#define BCE_QUEUE_USER_MIN 2
+#define BCE_QUEUE_USER_MAX (BCE_MAX_QUEUE_COUNT - 1)
 
 struct bce_device {
     struct pci_dev *pci;
@@ -15,6 +19,7 @@ struct bce_device {
     void __iomem *reg_mem_dma;
     struct bce_mailbox mbox;
     struct bce_queue *queues[BCE_MAX_QUEUE_COUNT];
+    struct ida queue_ida;
     struct bce_queue_cq *cmd_cq;
     struct bce_queue_cmdq *cmd_cmdq;
     struct bce_queue_sq *int_sq_list[BCE_MAX_QUEUE_COUNT];

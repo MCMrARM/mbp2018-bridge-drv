@@ -264,3 +264,66 @@ u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid)
     bce_cmd_finish(cmdq, &res);
     return res.status;
 }
+
+
+struct bce_queue_cq *bce_create_cq(struct bce_device *dev, u32 el_count)
+{
+    struct bce_queue_cq *cq;
+    struct bce_queue_memcfg cfg;
+    int qid = ida_simple_get(&dev->queue_ida, BCE_QUEUE_USER_MIN, BCE_QUEUE_USER_MAX, GFP_KERNEL);
+    if (qid < 0)
+        return NULL;
+    cq = bce_alloc_cq(dev, qid, el_count);
+    if (!cq)
+        return NULL;
+    bce_get_cq_memcfg(cq, &cfg);
+    if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, NULL, false) != 0) {
+        pr_err("bce: CQ registration failed (%i)", qid);
+        bce_free_cq(dev, cq);
+        return NULL;
+    }
+    return cq;
+}
+
+struct bce_queue_sq *bce_create_sq(struct bce_device *dev, struct bce_queue_cq *cq, const char *name, u32 el_count,
+        int direction, bce_sq_completion compl, void *userdata)
+{
+    struct bce_queue_sq *sq;
+    struct bce_queue_memcfg cfg;
+    int qid;
+    if (cq == NULL)
+        return NULL; /* cq can not be null */
+    if (name == NULL)
+        return NULL; /* name can not be null */
+    if (direction != DMA_TO_DEVICE && direction != DMA_FROM_DEVICE)
+        return NULL; /* unsupported direction */
+    qid = ida_simple_get(&dev->queue_ida, BCE_QUEUE_USER_MIN, BCE_QUEUE_USER_MAX, GFP_KERNEL);
+    if (qid < 0)
+        return NULL;
+    sq = bce_alloc_sq(dev, qid, sizeof(struct bce_qe_submission), el_count, compl, userdata);
+    if (!sq)
+        return NULL;
+    bce_get_sq_memcfg(sq, cq, &cfg);
+    if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, name, direction == DMA_FROM_DEVICE) != 0) {
+        pr_err("bce: SQ registration failed (%i)", qid);
+        bce_free_sq(dev, sq);
+        return NULL;
+    }
+    return sq;
+}
+
+void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq)
+{
+    if (bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) cq->qid))
+        pr_err("bce: CQ unregister failed");
+    ida_simple_remove(&dev->queue_ida, (uint) cq->qid);
+    bce_free_cq(dev, cq);
+}
+
+void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
+{
+    if (bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) sq->qid))
+        pr_err("bce: CQ unregister failed");
+    ida_simple_remove(&dev->queue_ida, (uint) sq->qid);
+    bce_free_sq(dev, sq);
+}
