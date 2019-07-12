@@ -70,20 +70,30 @@ void bce_unmap_dma_buffer(struct device *dev, struct bce_dma_buffer *buf)
 
 static int bce_alloc_scatterlist_from_vm(struct sg_table *tbl, void *data, size_t len)
 {
-    int status;
-    size_t off, start_page, end_page;
-    struct vm_struct *v = find_vm_area(data);
-    if (!v)
-        return -ENOENT;
-    WARN_ON(((size_t) v->addr % PAGE_SIZE) != 0);
+    int status, i;
+    struct page **pages;
+    size_t off, start_page, end_page, page_count;
     off        = (size_t) data % PAGE_SIZE;
-    start_page = (data - v->addr) / PAGE_SIZE;
-    end_page   = (data + len - 1 - v->addr) / PAGE_SIZE;
+    start_page = (size_t) data  / PAGE_SIZE;
+    end_page   = ((size_t) data + len - 1) / PAGE_SIZE;
+    page_count = end_page - start_page + 1;
 
-    if ((status = sg_alloc_table_from_pages(tbl, &v->pages[start_page], end_page - start_page + 1,
-                                            (unsigned int) off, len, GFP_KERNEL))) {
+    if (page_count > PAGE_SIZE / sizeof(struct page *))
+        pages = vmalloc(page_count * sizeof(struct page *));
+    else
+        pages = kmalloc(page_count * sizeof(struct page *), GFP_KERNEL);
+
+    for (i = 0; i < page_count; i++)
+        pages[i] = vmalloc_to_page((void *) ((start_page + i) * PAGE_SIZE));
+
+    if ((status = sg_alloc_table_from_pages(tbl, pages, page_count, (unsigned int) off, len, GFP_KERNEL))) {
         sg_free_table(tbl);
     }
+
+    if (page_count > PAGE_SIZE / sizeof(struct page *))
+        vfree(pages);
+    else
+        kfree(pages);
     return status;
 }
 
