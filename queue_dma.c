@@ -21,6 +21,9 @@ int bce_map_dma_buffer(struct device *dev, struct bce_dma_buffer *buf, struct sg
         dma_unmap_sg(dev, buf->scatterlist.sgl, buf->scatterlist.nents, dir);
         return -EIO;
     }
+    if (cnt == 1)
+        return 0;
+
     buf->seglist_hostinfo = bce_map_segment_list(dev, buf->scatterlist.sgl, buf->scatterlist.nents);
     if (!buf->seglist_hostinfo) {
         pr_err("bce: Creating segment list failed\n");
