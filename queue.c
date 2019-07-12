@@ -230,8 +230,9 @@ u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg 
     cmd->qid = cfg->qid;
     cmd->el_count = cfg->el_count;
     cmd->vector_or_cq = cfg->vector_or_cq;
+    memset(cmd->name, 0, sizeof(cmd->name));
     if (name) {
-        cmd->name_len = (u16) min(strlen(name), (size_t) 0x20);
+        cmd->name_len = (u16) min(strlen(name), (size_t) sizeof(cmd->name));
         memcpy(cmd->name, name, cmd->name_len);
     } else {
         cmd->name_len = 0;
