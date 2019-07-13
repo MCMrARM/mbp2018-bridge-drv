@@ -173,7 +173,7 @@ void bce_notify_submission_complete(struct bce_queue_sq *sq)
     }
 }
 
-int bce_set_submission_single(struct bce_qe_submission *element, dma_addr_t addr, size_t size)
+void bce_set_submission_single(struct bce_qe_submission *element, dma_addr_t addr, size_t size)
 {
     element->addr = addr;
     element->length = size;

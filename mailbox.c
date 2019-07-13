@@ -105,13 +105,14 @@ static void bc_send_timestamp(struct timer_list *tl)
     struct bce_timestamp *ts;
     unsigned long flags;
     u32 __iomem *regb;
+    ktime_t bt;
 
     ts = container_of(tl, struct bce_timestamp, timer);
     regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
     local_irq_save(flags);
     ioread32(regb + 1);
     mb();
-    ktime_t bt = ktime_get_boottime();
+    bt = ktime_get_boottime();
     iowrite32((u32) bt, regb + 1);
     iowrite32((u32) (bt >> 32), regb);
     local_irq_restore(flags);

@@ -155,7 +155,7 @@ void *bce_next_submission(struct bce_queue_sq *sq);
 void bce_submit_to_device(struct bce_queue_sq *sq);
 void bce_notify_submission_complete(struct bce_queue_sq *sq);
 
-int bce_set_submission_single(struct bce_qe_submission *element, dma_addr_t addr, size_t size);
+void bce_set_submission_single(struct bce_qe_submission *element, dma_addr_t addr, size_t size);
 
 struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count);
 void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq);
