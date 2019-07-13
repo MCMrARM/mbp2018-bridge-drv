@@ -214,6 +214,7 @@ static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct b
 
 static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
 {
+    mb();
     iowrite32(cmdq->tail, (u32 *) ((u8 *) cmdq->reg_mem_dma +  REG_DOORBELL_BASE) + cmdq->sq->qid);
     spin_unlock(&cmdq->lck);
 
@@ -221,12 +222,12 @@ static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct b
     mb();
 }
 
-u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirin)
+u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirout)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_register_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
     cmd->cmd = BCE_CMD_REGISTER_MEMORY_QUEUE;
-    cmd->flags = (u16) ((name ? 2 : 0) | (isdirin ? 1 : 0));
+    cmd->flags = (u16) ((name ? 2 : 0) | (isdirout ? 1 : 0));
     cmd->qid = cfg->qid;
     cmd->el_count = cfg->el_count;
     cmd->vector_or_cq = cfg->vector_or_cq;
@@ -307,7 +308,7 @@ struct bce_queue_sq *bce_create_sq(struct bce_device *dev, struct bce_queue_cq *
     if (!sq)
         return NULL;
     bce_get_sq_memcfg(sq, cq, &cfg);
-    if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, name, direction == DMA_FROM_DEVICE) != 0) {
+    if (bce_cmd_register_queue(dev->cmd_cmdq, &cfg, name, direction != DMA_FROM_DEVICE) != 0) {
         pr_err("bce: SQ registration failed (%i)", qid);
         bce_free_sq(dev, sq);
         ida_simple_remove(&dev->queue_ida, (uint) qid);

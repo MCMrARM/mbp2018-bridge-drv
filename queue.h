@@ -90,8 +90,8 @@ struct bce_qe_completion {
 };
 
 struct bce_qe_submission {
-    u64 addr;
     u64 length;
+    u64 addr;
 
     u64 segl_addr;
     u64 segl_length;
@@ -130,11 +130,13 @@ static __always_inline void *bce_cq_element(struct bce_queue_cq *q, int i) {
 }
 
 static __always_inline struct bce_sq_completion_data *bce_next_completion(struct bce_queue_sq *sq) {
+    struct bce_sq_completion_data *res;
     rmb();
     if (sq->completion_cidx == sq->completion_tail)
         return NULL;
+    res = &sq->completion_data[sq->completion_cidx];
     sq->completion_cidx = (sq->completion_cidx + 1) % sq->el_count;
-    return &sq->completion_data[sq->completion_cidx];
+    return res;
 }
 
 struct bce_queue_cq *bce_alloc_cq(struct bce_device *dev, int qid, u32 el_count);
@@ -150,7 +152,7 @@ void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq);
 struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count);
 void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq);
 
-u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirin);
+u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg *cfg, const char *name, bool isdirout);
 u32 bce_cmd_unregister_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
 u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid);
 
