@@ -43,6 +43,7 @@ struct bce_queue_sq {
 
     atomic_t available_commands;
     struct completion available_command_completion;
+    atomic_t available_command_completion_waiting_count;
     u32 head, tail;
 
     u32 completion_cidx, completion_tail;

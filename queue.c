@@ -112,6 +112,7 @@ struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, 
     q->reg_mem_dma = dev->reg_mem_dma;
     atomic_set(&q->available_commands, el_count - 1);
     init_completion(&q->available_command_completion);
+    atomic_set(&q->available_command_completion_waiting_count, 0);
     if (!q->data) {
         pr_err("DMA queue memory alloc failed\n");
         kfree(q);
@@ -141,7 +142,12 @@ int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long timeout)
     while (atomic_dec_if_positive(&sq->available_commands) < 0) {
         if (!timeout)
             return -EAGAIN;
+        atomic_inc(&sq->available_command_completion_waiting_count);
         timeout = wait_for_completion_timeout(&sq->available_command_completion, timeout);
+        if (!timeout) {
+            if (atomic_dec_if_positive(&sq->available_command_completion_waiting_count) < 0)
+                try_wait_for_completion(&sq->available_command_completion); /* consume the pending completion */
+        }
     }
     return 0;
 }
@@ -161,7 +167,8 @@ void bce_submit_to_device(struct bce_queue_sq *sq)
 void bce_notify_submission_complete(struct bce_queue_sq *sq)
 {
     sq->head = (sq->head + 1) % sq->el_count;
-    if (atomic_fetch_add(1, &sq->available_commands) < 0) {
+    atomic_inc(&sq->available_commands);
+    if (atomic_dec_if_positive(&sq->available_command_completion_waiting_count) >= 0) {
         complete(&sq->available_command_completion);
     }
 }
