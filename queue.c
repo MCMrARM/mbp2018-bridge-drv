@@ -109,6 +109,9 @@ struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, 
     q->completion = compl;
     q->userdata = userdata;
     q->completion_data = kzalloc(sizeof(struct bce_sq_completion_data) * el_count, GFP_KERNEL);
+    q->reg_mem_dma = dev->reg_mem_dma;
+    atomic_set(&q->available_commands, el_count - 1);
+    init_completion(&q->available_command_completion);
     if (!q->data) {
         pr_err("DMA queue memory alloc failed\n");
         kfree(q);
@@ -133,6 +136,35 @@ void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq)
     kfree(sq);
 }
 
+int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long timeout)
+{
+    while (atomic_dec_if_positive(&sq->available_commands) < 0) {
+        if (!timeout)
+            return -EAGAIN;
+        timeout = wait_for_completion_timeout(&sq->available_command_completion, timeout);
+    }
+    return 0;
+}
+
+void *bce_next_submission(struct bce_queue_sq *sq)
+{
+    void *ret = bce_sq_element(sq, sq->tail);
+    sq->tail = (sq->tail + 1) % sq->el_count;
+    return ret;
+}
+
+void bce_submit_to_device(struct bce_queue_sq *sq)
+{
+    iowrite32(sq->tail, (u32 *) ((u8 *) sq->reg_mem_dma +  REG_DOORBELL_BASE) + sq->qid);
+}
+
+void bce_notify_submission_complete(struct bce_queue_sq *sq)
+{
+    sq->head = (sq->head + 1) % sq->el_count;
+    if (atomic_fetch_add(1, &sq->available_commands) < 0) {
+        complete(&sq->available_command_completion);
+    }
+}
 
 static void bce_cmdq_completion(struct bce_queue_sq *q);
 
@@ -140,14 +172,12 @@ struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_co
 {
     struct bce_queue_cmdq *q;
     q = kzalloc(sizeof(struct bce_queue_cmdq), GFP_KERNEL);
-    q->reg_mem_dma = dev->reg_mem_dma;
     q->sq = bce_alloc_sq(dev, qid, BCE_CMD_SIZE, el_count, bce_cmdq_completion, q);
     if (!q->sq) {
         kfree(q);
         return NULL;
     }
     spin_lock_init(&q->lck);
-    init_completion(&q->nospace_cmpl);
     q->tres = kzalloc(sizeof(struct bce_queue_cmdq_result_el*) * el_count, GFP_KERNEL);
     if (!q->tres) {
         kfree(q);
@@ -165,14 +195,13 @@ void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq)
 
 void bce_cmdq_completion(struct bce_queue_sq *q)
 {
-    int nospace_notify;
     struct bce_queue_cmdq_result_el *el;
     struct bce_queue_cmdq *cmdq = q->userdata;
     struct bce_sq_completion_data *result;
 
+    spin_lock(&cmdq->lck);
     while ((result = bce_next_completion(q))) {
-        spin_lock(&cmdq->lck);
-        el = cmdq->tres[cmdq->head];
+        el = cmdq->tres[cmdq->sq->head];
         if (el) {
             el->result = result->result;
             el->status = result->status;
@@ -181,15 +210,10 @@ void bce_cmdq_completion(struct bce_queue_sq *q)
         } else {
             pr_err("bce: Unexpected command queue completion\n");
         }
-        cmdq->tres[cmdq->head] = NULL;
-        cmdq->head = (cmdq->head + 1) % cmdq->sq->el_count;
-        nospace_notify = cmdq->nospace_cntr;
-        if (nospace_notify)
-            --cmdq->nospace_cntr;
-        spin_unlock(&cmdq->lck);
-        if (nospace_notify > 0)
-            complete(&cmdq->nospace_cmpl);
+        cmdq->tres[cmdq->sq->head] = NULL;
+        bce_notify_submission_complete(q);
     }
+    spin_unlock(&cmdq->lck);
 }
 
 static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
@@ -198,24 +222,19 @@ static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct b
     init_completion(&res->cmpl);
     mb();
 
-    spin_lock(&cmdq->lck);
-    while ((cmdq->tail + 1) % cmdq->sq->el_count == cmdq->head) { // No free elements
-        ++cmdq->nospace_cntr;
-        spin_unlock(&cmdq->lck);
-        wait_for_completion(&cmdq->nospace_cmpl);
-        spin_lock(&cmdq->lck);
-    }
+    if (bce_reserve_submission(cmdq->sq, msecs_to_jiffies(1000L * 60 * 5))) // wait for up to ~5 minutes
+        return NULL;
 
-    ret = bce_sq_element(cmdq->sq, cmdq->tail);
-    cmdq->tres[cmdq->tail] = res;
-    cmdq->tail = (cmdq->tail + 1) % cmdq->sq->el_count;
+    spin_lock(&cmdq->lck);
+    cmdq->tres[cmdq->sq->tail] = res;
+    ret = bce_next_submission(cmdq->sq);
     return ret;
 }
 
 static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
 {
     mb();
-    iowrite32(cmdq->tail, (u32 *) ((u8 *) cmdq->reg_mem_dma +  REG_DOORBELL_BASE) + cmdq->sq->qid);
+    bce_submit_to_device(cmdq->sq);
     spin_unlock(&cmdq->lck);
 
     wait_for_completion(&res->cmpl);
@@ -226,6 +245,8 @@ u32 bce_cmd_register_queue(struct bce_queue_cmdq *cmdq, struct bce_queue_memcfg 
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_register_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    if (!cmd)
+        return (u32) -1;
     cmd->cmd = BCE_CMD_REGISTER_MEMORY_QUEUE;
     cmd->flags = (u16) ((name ? 2 : 0) | (isdirout ? 1 : 0));
     cmd->qid = cfg->qid;
@@ -249,6 +270,8 @@ u32 bce_cmd_unregister_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    if (!cmd)
+        return (u32) -1;
     cmd->cmd = BCE_CMD_UNREGISTER_MEMORY_QUEUE;
     cmd->flags = 0;
     cmd->qid = qid;
@@ -260,6 +283,8 @@ u32 bce_cmd_flush_memory_queue(struct bce_queue_cmdq *cmdq, u16 qid)
 {
     struct bce_queue_cmdq_result_el res;
     struct bce_cmdq_simple_memory_queue_cmd *cmd = bce_cmd_start(cmdq, &res);
+    if (!cmd)
+        return (u32) -1;
     cmd->cmd = BCE_CMD_FLUSH_MEMORY_QUEUE;
     cmd->flags = 0;
     cmd->qid = qid;

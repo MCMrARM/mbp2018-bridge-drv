@@ -39,6 +39,11 @@ struct bce_queue_sq {
     dma_addr_t dma_handle;
     void *data;
     void *userdata;
+    void __iomem *reg_mem_dma;
+
+    atomic_t available_commands;
+    struct completion available_command_completion;
+    u32 head, tail;
 
     u32 completion_cidx, completion_tail;
     struct bce_sq_completion_data *completion_data;
@@ -53,11 +58,7 @@ struct bce_queue_cmdq_result_el {
 };
 struct bce_queue_cmdq {
     struct bce_queue_sq *sq;
-    void __iomem *reg_mem_dma;
     struct spinlock lck;
-    u32 head, tail;
-    int nospace_cntr;
-    struct completion nospace_cmpl;
     struct bce_queue_cmdq_result_el **tres;
 };
 
@@ -148,6 +149,10 @@ struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, 
         bce_sq_completion compl, void *userdata);
 void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
 void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq);
+int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long timeout);
+void *bce_next_submission(struct bce_queue_sq *sq);
+void bce_submit_to_device(struct bce_queue_sq *sq);
+void bce_notify_submission_complete(struct bce_queue_sq *sq);
 
 struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count);
 void bce_free_cmdq(struct bce_device *dev, struct bce_queue_cmdq *cmdq);
