@@ -81,6 +81,9 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_ts;
     }
 
+
+    bce_vhci_create(bce, &bce->vhci);
+
     return 0;
 
 fail_ts:
@@ -208,6 +211,8 @@ static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_m
 static void bce_remove(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
+
+    bce_vhci_destroy(&bce->vhci);
 
     bce_timestamp_stop(&bce->timestamp);
     pci_free_irq(dev, 0, dev);

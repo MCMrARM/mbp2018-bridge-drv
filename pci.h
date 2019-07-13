@@ -4,6 +4,7 @@
 #include <linux/spinlock.h>
 #include "mailbox.h"
 #include "queue.h"
+#include "vhci/vhci.h"
 
 #define BC_PROTOCOL_VERSION 0x20001
 #define BCE_MAX_QUEUE_COUNT 0x100
@@ -24,5 +25,7 @@ struct bce_device {
     struct bce_queue_cq *cmd_cq;
     struct bce_queue_cmdq *cmd_cmdq;
     struct bce_queue_sq *int_sq_list[BCE_MAX_QUEUE_COUNT];
+
+    struct bce_vhci vhci;
 };
 

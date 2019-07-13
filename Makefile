@@ -1,5 +1,5 @@
 obj-m += bce.o
-bce-objs := pci.o mailbox.o queue.o
+bce-objs := pci.o mailbox.o queue.o queue_dma.o vhci/vhci.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
