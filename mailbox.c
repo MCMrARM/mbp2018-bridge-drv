@@ -5,6 +5,7 @@
 #define REG_MBOX_OUT_BASE 0x820
 #define REG_MBOX_REPLY_COUNTER 0x108
 #define REG_MBOX_REPLY_BASE 0x810
+#define REG_TIMESTAMP_BASE 0xC000
 
 #define BCE_MBOX_TIMEOUT_MS 200
 
@@ -72,4 +73,48 @@ int bce_mailbox_handle_interrupt(struct bce_mailbox *mb)
         complete(&mb->mb_completion);
     }
     return status;
+}
+
+static void bc_send_timestamp(struct timer_list *tl);
+
+void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg)
+{
+    u32 __iomem *regb;
+
+    ts->reg = reg;
+
+    regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+    iowrite32((u32) -4, regb + 1);
+    iowrite32((u32) -1, regb);
+
+    timer_setup(&ts->timer, bc_send_timestamp, 0);
+}
+
+void bce_timestamp_start(struct bce_timestamp *ts)
+{
+    mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
+}
+
+void bce_timestamp_stop(struct bce_timestamp *ts)
+{
+    del_timer_sync(&ts->timer);
+}
+
+static void bc_send_timestamp(struct timer_list *tl)
+{
+    struct bce_timestamp *ts;
+    unsigned long flags;
+    u32 __iomem *regb;
+
+    ts = container_of(tl, struct bce_timestamp, timer);
+    regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+    local_irq_save(flags);
+    ioread32(regb + 1);
+    mb();
+    ktime_t bt = ktime_get_boottime();
+    iowrite32((u32) bt, regb + 1);
+    iowrite32((u32) (bt >> 32), regb);
+    local_irq_restore(flags);
+
+    mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
 }

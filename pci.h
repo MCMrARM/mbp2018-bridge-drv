@@ -18,6 +18,7 @@ struct bce_device {
     void __iomem *reg_mem_mb;
     void __iomem *reg_mem_dma;
     struct bce_mailbox mbox;
+    struct bce_timestamp timestamp;
     struct bce_queue *queues[BCE_MAX_QUEUE_COUNT];
     struct ida queue_ida;
     struct bce_queue_cq *cmd_cq;

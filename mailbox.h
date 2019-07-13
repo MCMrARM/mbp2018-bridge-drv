@@ -3,6 +3,7 @@
 
 #include <linux/completion.h>
 #include <linux/pci.h>
+#include <linux/timer.h>
 
 struct bce_mailbox {
     void __iomem *reg_mb;
@@ -28,5 +29,17 @@ void bce_mailbox_init(struct bce_mailbox *mb, void __iomem *reg_mb);
 int bce_mailbox_send(struct bce_mailbox *mb, u64 msg, u64* recv);
 
 int bce_mailbox_handle_interrupt(struct bce_mailbox *mb);
+
+
+struct bce_timestamp {
+    void __iomem *reg;
+    struct timer_list timer;
+};
+
+void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg);
+
+void bce_timestamp_start(struct bce_timestamp *ts);
+
+void bce_timestamp_stop(struct bce_timestamp *ts);
 
 #endif //BCEDRIVER_MAILBOX_H

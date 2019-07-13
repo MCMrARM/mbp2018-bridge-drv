@@ -56,6 +56,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     }
 
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
+    bce_timestamp_init(&bce->timestamp, bce->reg_mem_mb);
 
     ida_init(&bce->queue_ida);
 
@@ -69,17 +70,21 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
     }
 
+    bce_timestamp_start(&bce->timestamp);
+
     if ((status = bce_fw_version_handshake(bce)))
-        goto fail_interrupt;
+        goto fail_ts;
     pr_info("bce: handshake done\n");
 
     if ((status = bce_create_command_queues(bce))) {
         pr_info("bce: Creating command queues failed\n");
-        goto fail_interrupt;
+        goto fail_ts;
     }
 
     return 0;
 
+fail_ts:
+    bce_timestamp_stop(&bce->timestamp);
 fail_interrupt:
     pci_free_irq(dev, 4, dev);
 fail_interrupt_0:
@@ -204,6 +209,7 @@ static void bce_remove(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
 
+    bce_timestamp_stop(&bce->timestamp);
     pci_free_irq(dev, 0, dev);
     pci_free_irq(dev, 4, dev);
     bce_free_command_queues(bce);
