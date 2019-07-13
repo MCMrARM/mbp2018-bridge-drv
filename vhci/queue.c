@@ -12,7 +12,7 @@ int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message
     if (!ret->cq)
         return -EINVAL;
     ret->sq = bce_create_sq(vhci->dev, ret->cq, name, VHCI_EVENT_QUEUE_EL_COUNT, DMA_TO_DEVICE,
-                            bce_vhci_message_queue_completion, vhci);
+                            bce_vhci_message_queue_completion, ret);
     if (!ret->sq) {
         status = -EINVAL;
         goto fail_cq;
@@ -58,7 +58,7 @@ static void bce_vhci_submit_pending(struct bce_vhci_event_queue *q, size_t count
 int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name)
 {
     ret->sq = bce_create_sq(vhci->dev, vhci->ev_cq, name, VHCI_EVENT_QUEUE_EL_COUNT, DMA_FROM_DEVICE,
-                            bce_vhci_event_queue_completion, vhci);
+                            bce_vhci_event_queue_completion, ret);
     if (!ret->sq)
         return -EINVAL;
     ret->data = dma_alloc_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
