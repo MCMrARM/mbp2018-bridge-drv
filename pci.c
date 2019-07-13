@@ -211,6 +211,7 @@ static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_m
 static void bce_remove(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
+    bce->is_being_removed = true;
 
     bce_vhci_destroy(&bce->vhci);
 

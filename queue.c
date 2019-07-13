@@ -359,7 +359,7 @@ struct bce_queue_sq *bce_create_sq(struct bce_device *dev, struct bce_queue_cq *
 
 void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq)
 {
-    if (bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) cq->qid))
+    if (!dev->is_being_removed && bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) cq->qid))
         pr_err("bce: CQ unregister failed");
     ida_simple_remove(&dev->queue_ida, (uint) cq->qid);
     bce_free_cq(dev, cq);
@@ -367,7 +367,7 @@ void bce_destroy_cq(struct bce_device *dev, struct bce_queue_cq *cq)
 
 void bce_destroy_sq(struct bce_device *dev, struct bce_queue_sq *sq)
 {
-    if (bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) sq->qid))
+    if (!dev->is_being_removed && bce_cmd_unregister_memory_queue(dev->cmd_cmdq, (u16) sq->qid))
         pr_err("bce: CQ unregister failed");
     ida_simple_remove(&dev->queue_ida, (uint) sq->qid);
     bce_free_sq(dev, sq);

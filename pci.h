@@ -25,6 +25,7 @@ struct bce_device {
     struct bce_queue_cq *cmd_cq;
     struct bce_queue_cmdq *cmd_cmdq;
     struct bce_queue_sq *int_sq_list[BCE_MAX_QUEUE_COUNT];
+    bool is_being_removed;
 
     struct bce_vhci vhci;
 };
