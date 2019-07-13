@@ -15,11 +15,20 @@ struct bce_vhci_message {
     u64 param2;
 };
 
+struct bce_vhci_message_queue {
+    struct bce_queue_cq *cq;
+    struct bce_queue_sq *sq;
+    struct bce_vhci_message *data;
+    dma_addr_t dma_addr;
+};
 struct bce_vhci_event_queue {
     struct bce_queue_sq *sq;
     struct bce_vhci_message *data;
     dma_addr_t dma_addr;
 };
+
+int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message_queue *ret, const char *name);
+void bce_vhci_message_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_message_queue *q);
 
 int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name);
 void bce_vhci_event_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_event_queue *q);

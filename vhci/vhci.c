@@ -3,6 +3,8 @@
 
 static int bce_vhci_create_event_queues(struct bce_vhci *vhci);
 static void bce_vhci_destroy_event_queues(struct bce_vhci *vhci);
+static int bce_vhci_create_message_queues(struct bce_vhci *vhci);
+static void bce_vhci_destroy_message_queues(struct bce_vhci *vhci);
 
 int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
 {
@@ -10,15 +12,40 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
 
     vhci->dev = dev;
 
-    if ((status = bce_vhci_create_event_queues(vhci)))
+    if ((status = bce_vhci_create_message_queues(vhci)))
         return status;
-
+    if ((status = bce_vhci_create_event_queues(vhci))) {
+        bce_vhci_destroy_message_queues(vhci);
+        return status;
+    }
     return 0;
 }
 
 void bce_vhci_destroy(struct bce_vhci *vhci)
 {
     bce_vhci_destroy_event_queues(vhci);
+}
+
+static int bce_vhci_create_message_queues(struct bce_vhci *vhci)
+{
+    if (bce_vhci_message_queue_create(vhci, &vhci->msg_commands, "VHC1HostCommands") ||
+        bce_vhci_message_queue_create(vhci, &vhci->msg_system, "VHC1HostSystemEvents") ||
+        bce_vhci_message_queue_create(vhci, &vhci->msg_isochronous, "VHC1HostIsochronousEvents") ||
+        bce_vhci_message_queue_create(vhci, &vhci->msg_interrupt, "VHC1HostInterruptEvents") ||
+        bce_vhci_message_queue_create(vhci, &vhci->msg_asynchronous, "VHC1HostAsynchronousEvents")) {
+        bce_vhci_destroy_message_queues(vhci);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static void bce_vhci_destroy_message_queues(struct bce_vhci *vhci)
+{
+    bce_vhci_message_queue_destroy(vhci, &vhci->msg_commands);
+    bce_vhci_message_queue_destroy(vhci, &vhci->msg_system);
+    bce_vhci_message_queue_destroy(vhci, &vhci->msg_isochronous);
+    bce_vhci_message_queue_destroy(vhci, &vhci->msg_interrupt);
+    bce_vhci_message_queue_destroy(vhci, &vhci->msg_asynchronous);
 }
 
 static int bce_vhci_create_event_queues(struct bce_vhci *vhci)

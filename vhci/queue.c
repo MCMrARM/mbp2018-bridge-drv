@@ -2,6 +2,56 @@
 #include "vhci.h"
 #include "../pci.h"
 
+
+static void bce_vhci_message_queue_completion(struct bce_queue_sq *sq);
+
+int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message_queue *ret, const char *name)
+{
+    int status;
+    ret->cq = bce_create_cq(vhci->dev, VHCI_EVENT_QUEUE_EL_COUNT);
+    if (!ret->cq)
+        return -EINVAL;
+    ret->sq = bce_create_sq(vhci->dev, ret->cq, name, VHCI_EVENT_QUEUE_EL_COUNT, DMA_TO_DEVICE,
+                            bce_vhci_message_queue_completion, vhci);
+    if (!ret->sq) {
+        status = -EINVAL;
+        goto fail_cq;
+    }
+    ret->data = dma_alloc_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
+                                   &ret->dma_addr, GFP_KERNEL);
+    if (!ret->data) {
+        status = -EINVAL;
+        goto fail_sq;
+    }
+    return 0;
+
+fail_sq:
+    bce_destroy_sq(vhci->dev, ret->sq);
+    ret->sq = NULL;
+fail_cq:
+    bce_destroy_cq(vhci->dev, ret->cq);
+    ret->cq = NULL;
+    return status;
+}
+
+void bce_vhci_message_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_message_queue *q)
+{
+    if (!q->cq)
+        return;
+    dma_free_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
+                      q->data, q->dma_addr);
+    bce_destroy_sq(vhci->dev, q->sq);
+    bce_destroy_cq(vhci->dev, q->cq);
+}
+
+static void bce_vhci_message_queue_completion(struct bce_queue_sq *sq)
+{
+    while (bce_next_completion(sq))
+        bce_notify_submission_complete(sq);
+}
+
+
+
 static void bce_vhci_event_queue_completion(struct bce_queue_sq *sq);
 static void bce_vhci_submit_pending(struct bce_vhci_event_queue *q, size_t count);
 
@@ -25,11 +75,11 @@ int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_que
 
 void bce_vhci_event_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_event_queue *q)
 {
-    if (q->sq) {
-        dma_free_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
-                          q->data, q->dma_addr);
-        bce_destroy_sq(vhci->dev, q->sq);
-    }
+    if (!q->sq)
+        return;
+    dma_free_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
+                      q->data, q->dma_addr);
+    bce_destroy_sq(vhci->dev, q->sq);
 }
 
 static void bce_vhci_event_queue_completion(struct bce_queue_sq *sq)
