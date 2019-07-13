@@ -173,6 +173,13 @@ void bce_notify_submission_complete(struct bce_queue_sq *sq)
     }
 }
 
+int bce_set_submission_single(struct bce_qe_submission *element, dma_addr_t addr, size_t size)
+{
+    element->addr = addr;
+    element->length = size;
+    element->segl_addr = element->segl_length = 0;
+}
+
 static void bce_cmdq_completion(struct bce_queue_sq *q);
 
 struct bce_queue_cmdq *bce_alloc_cmdq(struct bce_device *dev, int qid, u32 el_count)

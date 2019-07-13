@@ -189,7 +189,7 @@ static void bce_unmap_segement_list(struct device *dev, struct bce_segment_list_
     }
 }
 
-int bce_fill_submission(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length)
+int bce_set_submission_buf(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length)
 {
     struct bce_segment_list_element_hostinfo *seg;
     struct bce_segment_list_header *seg_header;

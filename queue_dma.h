@@ -45,6 +45,6 @@ int bce_map_dma_buffer_km(struct device *dev, struct bce_dma_buffer *buf, void *
 
 void bce_unmap_dma_buffer(struct device *dev, struct bce_dma_buffer *buf);
 
-int bce_fill_submission(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length);
+int bce_set_submission_buf(struct bce_qe_submission *element, struct bce_dma_buffer *buf, size_t offset, size_t length);
 
 #endif //BCE_QUEUE_DMA_H
