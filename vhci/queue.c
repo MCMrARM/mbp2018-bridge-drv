@@ -193,5 +193,11 @@ int bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce
         return -ETIMEDOUT;
     }
 
-    return 0;
+    if ((res->cmd & ~0x8000) != req->cmd) {
+        pr_err("bce-vhci: Possible desync, cmd reply mismatch req=%x, res=%x\n", req->cmd, res->cmd);
+        return -EIO;
+    }
+    if (res->status == BCE_VHCI_SUCCESS)
+        return 0;
+    return res->status;
 }
