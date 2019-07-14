@@ -251,10 +251,14 @@ static int __init bce_module_init(void)
         result = PTR_ERR(bce_class);
         goto fail_class;
     }
+    if ((result = bce_vhci_module_init())) {
+        pr_err("bce: bce-vhci init failed");
+        goto fail_class;
+    }
+
     result = pci_register_driver(&bce_pci_driver);
     if (result)
         goto fail_drv;
-
     return 0;
 
 fail_drv:
@@ -269,6 +273,7 @@ fail_chrdev:
 }
 static void __exit bce_module_exit(void)
 {
+    bce_vhci_module_exit();
     class_destroy(bce_class);
     unregister_chrdev_region(bce_chrdev, 1);
     pci_unregister_driver(&bce_pci_driver);
