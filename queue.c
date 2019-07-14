@@ -80,6 +80,7 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
         e = bce_cq_element(cq, cq->index);
         if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
             break;
+        pr_info("bce: compl: %i: %i %llx %llx", e->qid, e->status, e->data_size, e->result);
         bce_handle_cq_completion(dev, e, &ce);
         e->flags = 0;
         cq->index = (cq->index + 1) % cq->el_count;
@@ -137,14 +138,14 @@ void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq)
     kfree(sq);
 }
 
-int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long timeout)
+int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long *timeout)
 {
     while (atomic_dec_if_positive(&sq->available_commands) < 0) {
-        if (!timeout)
+        if (!timeout || !*timeout)
             return -EAGAIN;
         atomic_inc(&sq->available_command_completion_waiting_count);
-        timeout = wait_for_completion_timeout(&sq->available_command_completion, timeout);
-        if (!timeout) {
+        *timeout = wait_for_completion_timeout(&sq->available_command_completion, *timeout);
+        if (!*timeout) {
             if (atomic_dec_if_positive(&sq->available_command_completion_waiting_count) < 0)
                 try_wait_for_completion(&sq->available_command_completion); /* consume the pending completion */
         }
@@ -233,10 +234,12 @@ void bce_cmdq_completion(struct bce_queue_sq *q)
 static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
 {
     void *ret;
+    unsigned long timeout;
     init_completion(&res->cmpl);
     mb();
 
-    if (bce_reserve_submission(cmdq->sq, msecs_to_jiffies(1000L * 60 * 5))) // wait for up to ~5 minutes
+    timeout = msecs_to_jiffies(1000L * 60 * 5); /* wait for up to ~5 minutes */
+    if (bce_reserve_submission(cmdq->sq, &timeout))
         return NULL;
 
     spin_lock(&cmdq->lck);
