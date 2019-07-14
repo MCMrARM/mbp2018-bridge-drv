@@ -12,6 +12,7 @@ struct bce_vhci {
     struct bce_vhci_message_queue msg_isochronous;
     struct bce_vhci_message_queue msg_interrupt;
     struct bce_vhci_message_queue msg_asynchronous;
+    struct bce_vhci_command_queue cq;
     struct bce_queue_cq *ev_cq;
     struct bce_vhci_event_queue ev_commands;
     struct bce_vhci_event_queue ev_system;
