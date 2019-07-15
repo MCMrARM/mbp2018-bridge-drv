@@ -83,8 +83,8 @@ enum bce_qe_completion_flags {
     BCE_COMPLETION_FLAG_PENDING = 0x8000
 };
 struct bce_qe_completion {
-    u64 data_size;
     u64 result;
+    u64 data_size;
     u16 qid;
     u16 completion_index;
     u16 status; // bce_qe_completion_status
