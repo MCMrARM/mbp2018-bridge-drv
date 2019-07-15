@@ -44,7 +44,7 @@ void bce_vhci_message_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_messa
     bce_destroy_cq(vhci->dev, q->cq);
 }
 
-int bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vhci_message *req)
+void bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vhci_message *req)
 {
     int sidx;
     struct bce_qe_submission *s;
@@ -55,7 +55,6 @@ int bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vh
     bce_set_submission_single(s,q->dma_addr + sizeof(struct bce_vhci_message) * sidx,
             sizeof(struct bce_vhci_message));
     bce_submit_to_device(q->sq);
-    return 0;
 }
 
 static void bce_vhci_message_queue_completion(struct bce_queue_sq *sq)

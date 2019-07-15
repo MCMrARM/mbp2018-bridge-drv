@@ -55,7 +55,7 @@ struct bce_vhci_command_queue {
 
 int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message_queue *ret, const char *name);
 void bce_vhci_message_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_message_queue *q);
-int bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vhci_message *req);
+void bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vhci_message *req);
 
 int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
         bce_vhci_event_queue_callback cb);
