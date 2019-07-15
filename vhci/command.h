@@ -3,6 +3,7 @@
 
 #include "queue.h"
 #include <linux/jiffies.h>
+#include <linux/usb.h>
 
 #define BCE_VHCI_CMD_TIMEOUT_SHORT msecs_to_jiffies(2000)
 #define BCE_VHCI_CMD_TIMEOUT_LONG msecs_to_jiffies(30000)
@@ -105,6 +106,7 @@ static inline int bce_vhci_cmd_port_disable(struct bce_vhci_command_queue *q, bc
     struct bce_vhci_message cmd, res;
     cmd.cmd = BCE_VHCI_CMD_PORT_DISABLE;
     cmd.param1 = port;
+    dump_stack();
     return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
 }
 static inline int bce_vhci_cmd_port_status(struct bce_vhci_command_queue *q, bce_vhci_port_t port,
@@ -121,7 +123,8 @@ static inline int bce_vhci_cmd_port_status(struct bce_vhci_command_queue *q, bce
     return status;
 }
 
-static inline int bce_vhci_cmd_device_create(struct bce_vhci_command_queue *q, bce_vhci_port_t port, bce_vhci_device_t *dev)
+static inline int bce_vhci_cmd_device_create(struct bce_vhci_command_queue *q, bce_vhci_port_t port,
+        bce_vhci_device_t *dev)
 {
     int status;
     struct bce_vhci_message cmd, res;
@@ -138,6 +141,37 @@ static inline int bce_vhci_cmd_device_destroy(struct bce_vhci_command_queue *q, 
     cmd.cmd = BCE_VHCI_CMD_DEVICE_DESTROY;
     cmd.param1 = dev;
     return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_LONG);
+}
+
+static inline int bce_vhci_cmd_endpoint_create(struct bce_vhci_command_queue *q, bce_vhci_device_t dev,
+        struct usb_endpoint_descriptor *desc)
+{
+    struct bce_vhci_message cmd, res;
+    int endpoint_type = usb_endpoint_type(desc);
+    int maxp = usb_endpoint_maxp(desc);
+    int maxp_burst = usb_endpoint_maxp_mult(desc) * maxp;
+    cmd.cmd = BCE_VHCI_CMD_ENDPOINT_CREATE;
+    cmd.param1 = dev | ((desc->bEndpointAddress & 0x8Fu) << 8);
+    cmd.param2 = endpoint_type | (maxp << 16) | ((u64) maxp_burst << 32);
+    if (endpoint_type == USB_ENDPOINT_XFER_BULK)
+        cmd.param2 |= 0x20;
+    if (endpoint_type == USB_ENDPOINT_XFER_INT)
+        cmd.param2 |= (desc->bInterval - 1) << 8;
+    return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
+}
+static inline int bce_vhci_cmd_endpoint_destroy(struct bce_vhci_command_queue *q, bce_vhci_device_t dev, u8 endpoint)
+{
+    struct bce_vhci_message cmd, res;
+    cmd.cmd = BCE_VHCI_CMD_ENDPOINT_DESTROY;
+    cmd.param1 = dev | (endpoint << 8);
+    return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
+}
+static inline int bce_vhci_cmd_endpoint_reset(struct bce_vhci_command_queue *q, bce_vhci_device_t dev, u8 endpoint)
+{
+    struct bce_vhci_message cmd, res;
+    cmd.cmd = BCE_VHCI_CMD_ENDPOINT_RESET;
+    cmd.param1 = dev | (endpoint << 8);
+    return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
 }
 
 
