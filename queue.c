@@ -153,6 +153,11 @@ int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long *timeout)
     return 0;
 }
 
+void bce_cancel_submission_reservation(struct bce_queue_sq *sq)
+{
+    atomic_inc(&sq->available_commands);
+}
+
 void *bce_next_submission(struct bce_queue_sq *sq)
 {
     void *ret = bce_sq_element(sq, sq->tail);

@@ -151,6 +151,7 @@ struct bce_queue_sq *bce_alloc_sq(struct bce_device *dev, int qid, u32 el_size, 
 void bce_get_sq_memcfg(struct bce_queue_sq *sq, struct bce_queue_cq *cq, struct bce_queue_memcfg *cfg);
 void bce_free_sq(struct bce_device *dev, struct bce_queue_sq *sq);
 int bce_reserve_submission(struct bce_queue_sq *sq, unsigned long *timeout);
+void bce_cancel_submission_reservation(struct bce_queue_sq *sq);
 void *bce_next_submission(struct bce_queue_sq *sq);
 void bce_submit_to_device(struct bce_queue_sq *sq);
 void bce_notify_submission_complete(struct bce_queue_sq *sq);
