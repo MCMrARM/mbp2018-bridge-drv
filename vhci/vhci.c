@@ -36,11 +36,12 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
         status = -ENOMEM;
         goto fail_hcd;
     }
+    vhci->hcd->self.sysdev = &dev->pci->dev;
     *((struct bce_vhci **) vhci->hcd->hcd_priv) = vhci;
+    vhci->hcd->speed = HCD_USB2;
 
     if ((status = usb_add_hcd(vhci->hcd, 0, 0)))
         goto fail_hcd;
-    usb_put_hcd(vhci->hcd);
 
     return 0;
 
@@ -77,25 +78,108 @@ int bce_vhci_start(struct usb_hcd *hcd)
     bce_vhci_port_t port_no = 0;
     if ((status = bce_vhci_cmd_controller_enable(&vhci->cq, 1, &port_mask)))
         return status;
+    vhci->port_mask = port_mask;
+    vhci->port_power_mask = 0;
     if ((status = bce_vhci_cmd_controller_start(&vhci->cq)))
         return status;
+    port_mask = vhci->port_mask;
     while (port_mask) {
-        if (port_mask & 1) {
-            pr_info("bce-vhci: powering port on %i\n", port_no);
-            if (bce_vhci_cmd_port_power_on(&vhci->cq, port_no))
-                pr_err("bce-vhci: port power on failed\n");
-        }
-
         port_no += 1;
         port_mask >>= 1;
     }
+    vhci->port_count = port_no;
     return 0;
 }
 
-int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u16 wIndex, char *buf, u16 wLength)
+static int bce_vhci_hub_status_data(struct usb_hcd *hcd, char *buf)
 {
-    pr_info("bce-vhci: bce_vhci_hub_control %x\n", typeReq);
     return 0;
+}
+
+static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u16 wIndex, char *buf, u16 wLength)
+{
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    int status;
+    struct usb_hub_descriptor *hd;
+    struct usb_hub_status *hs;
+    struct usb_port_status *ps;
+    u32 port_status;
+    // pr_info("bce-vhci: bce_vhci_hub_control %x %i %i [bufl=%i]\n", typeReq, wValue, wIndex, wLength);
+    if (typeReq == GetHubDescriptor && wLength >= sizeof(struct usb_hub_descriptor)) {
+        hd = (struct usb_hub_descriptor *) buf;
+        memset(hd, 0, sizeof(*hd));
+        hd->bDescLength = sizeof(struct usb_hub_descriptor);
+        hd->bDescriptorType = USB_DT_HUB;
+        hd->bNbrPorts = (u8) vhci->port_count;
+        hd->wHubCharacteristics = HUB_CHAR_INDV_PORT_LPSM | HUB_CHAR_INDV_PORT_OCPM;
+        hd->bPwrOn2PwrGood = 0;
+        hd->bHubContrCurrent = 0;
+        return 0;
+    } else if (typeReq == GetHubStatus && wLength >= sizeof(struct usb_hub_status)) {
+        hs = (struct usb_hub_status *) buf;
+        memset(hs, 0, sizeof(*hs));
+        hs->wHubStatus = 0;
+        hs->wHubChange = 0;
+        return 0;
+    } else if (typeReq == GetPortStatus && wLength >= 4 /* usb 2.0 */) {
+        ps = (struct usb_port_status *) buf;
+        ps->wPortStatus = 0;
+        ps->wPortChange = 0;
+
+        if ((status = bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0, &port_status)))
+            return status;
+
+        if (vhci->port_power_mask & BIT(wIndex))
+            ps->wPortStatus |= USB_PORT_STAT_POWER;
+        if (port_status & 16)
+            ps->wPortStatus |= USB_PORT_STAT_ENABLE | USB_PORT_STAT_HIGH_SPEED;
+        if (port_status & 4)
+            ps->wPortStatus |= USB_PORT_STAT_CONNECTION;
+        if (port_status & 2)
+            ps->wPortStatus |= USB_PORT_STAT_OVERCURRENT;
+        if (port_status & 8)
+            ps->wPortStatus |= USB_PORT_STAT_RESET;
+        if (port_status & 0x60)
+            ps->wPortStatus |= USB_PORT_STAT_SUSPEND;
+
+        if (port_status & 0x40000)
+            ps->wPortStatus |= USB_PORT_STAT_C_CONNECTION;
+
+        // pr_info("bce-vhci: Translated status %x to %x:%x\n", port_status, ps->wPortStatus, ps->wPortChange);
+        return 0;
+    } else if (typeReq == SetPortFeature) {
+        if (wValue == USB_PORT_FEAT_POWER) {
+            status = bce_vhci_cmd_port_power_on(&vhci->cq, (u8) wIndex);
+            if (!status)
+                vhci->port_power_mask |= BIT(wIndex);
+            return status;
+        }
+        if (wValue == USB_PORT_FEAT_RESET)
+            return bce_vhci_cmd_port_reset(&vhci->cq, (u8) wIndex, wValue);
+    } else if (typeReq == ClearPortFeature) {
+        if (wValue == USB_PORT_FEAT_ENABLE)
+            return bce_vhci_cmd_port_disable(&vhci->cq, (u8) wIndex);
+        if (wValue == USB_PORT_FEAT_POWER) {
+            status = bce_vhci_cmd_port_power_off(&vhci->cq, (u8) wIndex);
+            if (!status)
+                vhci->port_power_mask &= ~BIT(wIndex);
+            return status;
+        }
+        if (wValue == USB_PORT_FEAT_C_CONNECTION)
+            return bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0x40000, &port_status);
+        if (wValue == USB_PORT_FEAT_C_RESET) /* I don't think I can transfer it in any way */
+            return 0;
+    } else if (typeReq == DeviceRequest | USB_REQ_GET_DESCRIPTOR) {
+        //
+    }
+    pr_err("bce-vhci: bce_vhci_hub_control unhandled request: %x %i %i [bufl=%i]\n", typeReq, wValue, wIndex, wLength);
+    dump_stack();
+    return -EIO;
+}
+
+static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
+{
+    pr_info("bce_vhci_urb_enqueue\n");
 }
 
 static int bce_vhci_create_message_queues(struct bce_vhci *vhci)
@@ -173,6 +257,7 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
 }
 
 
+
 static const struct hc_driver bce_vhci_driver = {
         .description = "bce-vhci",
         .product_desc = "BCE VHCI Host Controller",
@@ -181,7 +266,9 @@ static const struct hc_driver bce_vhci_driver = {
         .flags = HCD_USB2,
 
         .start = bce_vhci_start,
-        .hub_control = bce_vhci_hub_control
+        .hub_status_data = bce_vhci_hub_status_data,
+        .hub_control = bce_vhci_hub_control,
+        .urb_enqueue = bce_vhci_urb_enqueue
 };
 
 
