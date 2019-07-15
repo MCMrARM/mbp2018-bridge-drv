@@ -129,7 +129,7 @@ static inline int bce_vhci_cmd_device_create(struct bce_vhci_command_queue *q, b
     cmd.param1 = port;
     status = bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
     if (!status)
-        *dev = (bce_vhci_device_t) cmd.param2;
+        *dev = (bce_vhci_device_t) res.param2;
     return status;
 }
 static inline int bce_vhci_cmd_device_destroy(struct bce_vhci_command_queue *q, bce_vhci_device_t dev)
