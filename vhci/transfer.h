@@ -13,15 +13,20 @@ struct bce_vhci_list_message {
 struct bce_vhci_transfer_queue {
     struct bce_vhci *vhci;
     struct usb_host_endpoint *endp;
+    enum bce_vhci_endpoint_state state;
+    bool active;
     bce_vhci_device_t dev_addr;
     struct bce_queue_cq *cq;
     struct bce_queue_sq *sq_in;
     struct bce_queue_sq *sq_out;
     struct list_head evq;
     struct spinlock urb_lock;
+    struct mutex state_change_mutex;
     struct list_head giveback_urb_list;
 };
 enum bce_vhci_urb_state {
+    BCE_VHCI_URB_INIT_PAUSED,
+
     BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST,
     BCE_VHCI_URB_WAITING_FOR_COMPLETION,
     BCE_VHCI_URB_DATA_TRANSFER_COMPLETE,
@@ -36,6 +41,8 @@ struct bce_vhci_urb {
     bool is_control;
     enum bce_vhci_urb_state state;
     int received_status;
+    u32 send_offset;
+    u32 receive_offset;
 };
 
 void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_transfer_queue *q,
@@ -45,5 +52,8 @@ void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce
 
 int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb);
 int bce_vhci_urb_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int status);
+
+int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q);
+int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q);
 
 #endif //BCEDRIVER_TRANSFER_H

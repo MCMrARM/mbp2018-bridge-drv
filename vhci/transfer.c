@@ -1,6 +1,7 @@
 #include "transfer.h"
 #include "../queue.h"
 #include "vhci.h"
+#include "../pci.h"
 #include <linux/usb/hcd.h>
 
 #define BCE_VHCI_MSG_TRANSFER_REQUEST 0x1000
@@ -18,9 +19,12 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     INIT_LIST_HEAD(&q->evq);
     INIT_LIST_HEAD(&q->giveback_urb_list);
     spin_lock_init(&q->urb_lock);
+    mutex_init(&q->state_change_mutex);
     q->vhci = vhci;
     q->endp = endp;
     q->dev_addr = dev_addr;
+    q->state = BCE_VHCI_EDNPOINT_ACTIVE;
+    q->active = true;
     q->cq = bce_create_cq(vhci->dev, 0x100);
     if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL) {
         snprintf(name, sizeof(name), "VHC1-%i-%02x", dev_addr, 0x80 | usb_endpoint_num(&endp->desc));
@@ -116,6 +120,8 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     struct bce_vhci_transfer_queue *q = sq->userdata;
     spin_lock(&q->urb_lock);
     while ((c = bce_next_completion(sq))) {
+        if (c->status == BCE_COMPLETION_ABORTED) /* We flushed the queue */
+            continue;
         if (list_empty(&q->endp->urb_list)) {
             pr_err("bce-vhci: Got a completion while no requests are pending\n");
             continue;
@@ -130,7 +136,62 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     bce_vhci_transfer_queue_giveback(q);
 }
 
+int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
+{
+    struct bce_vhci_list_message *lm;
+    int status;
+    u8 endp_addr = (u8) (q->endp->desc.bEndpointAddress & 0x8F);
+    spin_lock(&q->urb_lock);
+    q->active = false;
+    spin_unlock(&q->urb_lock);
+    if (q->sq_out) {
+        pr_err("bce-vhci: Not implemented: wait for pending output requests\n");
+    }
+    spin_lock(&q->urb_lock);
+    while (!list_empty(&q->evq)) {
+        lm = list_first_entry(&q->evq, struct bce_vhci_list_message, list);
+        list_del(&lm->list);
+        kfree(lm);
+    }
+    spin_unlock(&q->urb_lock);
+    if ((status = bce_vhci_cmd_endpoint_set_state(
+            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_EDNPOINT_PAUSED, &q->state)))
+        return status;
+    if (q->state != BCE_VHCI_EDNPOINT_PAUSED)
+        return -EINVAL;
+    if (q->sq_in)
+        bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_in->qid);
+    if (q->sq_out)
+        bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_out->qid);
+    return 0;
+}
 
+static void bce_vhci_urb_resume(struct bce_vhci_urb *urb);
+
+int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
+{
+    int status;
+    struct urb *urb, *urbt;
+    struct bce_vhci_urb *vurb;
+    u8 endp_addr = (u8) (q->endp->desc.bEndpointAddress & 0x8F);
+    if ((status = bce_vhci_cmd_endpoint_set_state(
+            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_EDNPOINT_ACTIVE, &q->state)))
+        return status;
+    if (q->state != BCE_VHCI_EDNPOINT_ACTIVE)
+        return -EINVAL;
+    spin_lock(&q->urb_lock);
+    q->active = true;
+    list_for_each_entry_safe(urb, urbt, &q->endp->urb_list, urb_list) {
+        vurb = urb->hcpriv;
+        bce_vhci_urb_resume(vurb);
+    }
+    bce_vhci_transfer_queue_deliver_pending(q);
+    spin_unlock(&q->urb_lock);
+    return 0;
+}
+
+
+static int bce_vhci_urb_init(struct bce_vhci_urb *vurb);
 static int bce_vhci_urb_data_start(struct bce_vhci_urb *urb, unsigned long *timeout);
 
 int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
@@ -154,10 +215,10 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
         return status;
     }
 
-    if (vurb->is_control)
-        vurb->state = BCE_VHCI_URB_CONTROL_SETUP;
+    if (q->active)
+        status = bce_vhci_urb_init(vurb);
     else
-        status = bce_vhci_urb_data_start(vurb, NULL);
+        vurb->state = BCE_VHCI_URB_INIT_PAUSED;
     if (status) {
         usb_hcd_unlink_urb_from_ep(q->vhci->hcd, urb);
         urb->hcpriv = NULL;
@@ -168,6 +229,16 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     spin_unlock(&q->urb_lock);
     pr_info("bce-vhci: URB created\n");
     return status;
+}
+
+static int bce_vhci_urb_init(struct bce_vhci_urb *vurb)
+{
+    if (vurb->is_control) {
+        vurb->state = BCE_VHCI_URB_CONTROL_SETUP;
+        return 0;
+    } else {
+        return bce_vhci_urb_data_start(vurb, NULL);
+    }
 }
 
 static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
@@ -202,13 +273,46 @@ int bce_vhci_urb_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int 
     return ret;
 }
 
-
-static int bce_vhci_urb_data_start(struct bce_vhci_urb *urb, unsigned long *timeout)
+static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long *timeout)
 {
     struct bce_vhci_message msg;
     struct bce_qe_submission *s;
+    u32 tr_len;
     int reservation1, reservation2 = -EFAULT;
 
+    pr_info("bce-vhci: DMA from device %llx %x\n", urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
+
+    /* Reserve both a message and a submission, so we don't run into issues later. */
+    reservation1 = bce_reserve_submission(urb->q->vhci->msg_asynchronous.sq, timeout);
+    if (!reservation1)
+        reservation2 = bce_reserve_submission(urb->q->sq_in, timeout);
+    if (reservation1 || reservation2) {
+        pr_err("bce-vhci: Failed to reserve a submission for URB data transfer\n");
+        if (!reservation1)
+            bce_cancel_submission_reservation(urb->q->sq_in);
+        return -ENOMEM;
+    }
+
+    urb->send_offset = urb->receive_offset;
+
+    tr_len = urb->urb->transfer_buffer_length - urb->send_offset;
+
+    msg.cmd = BCE_VHCI_MSG_TRANSFER_REQUEST;
+    msg.status = 0;
+    msg.param1 = ((urb->urb->ep->desc.bEndpointAddress & 0x8Fu) << 8) | urb->q->dev_addr;
+    msg.param2 = tr_len;
+    bce_vhci_message_queue_write(&urb->q->vhci->msg_asynchronous, &msg);
+
+    s = bce_next_submission(urb->q->sq_in);
+    bce_set_submission_single(s, urb->urb->transfer_dma + urb->send_offset, tr_len);
+    bce_submit_to_device(urb->q->sq_in);
+
+    urb->state = BCE_VHCI_URB_WAITING_FOR_COMPLETION;
+    return 0;
+}
+
+static int bce_vhci_urb_data_start(struct bce_vhci_urb *urb, unsigned long *timeout)
+{
     if (urb->dir == DMA_TO_DEVICE) {
         if (urb->urb->transfer_buffer_length > 0)
             urb->state = BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST;
@@ -216,31 +320,7 @@ static int bce_vhci_urb_data_start(struct bce_vhci_urb *urb, unsigned long *time
             urb->state = BCE_VHCI_URB_DATA_TRANSFER_COMPLETE;
         return 0;
     } else {
-        pr_info("bce-vhci: DMA from device %llx %x\n", urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
-
-        /* Reserve both a message and a submission, so we don't run into issues later. */
-        reservation1 = bce_reserve_submission(urb->q->vhci->msg_asynchronous.sq, timeout);
-        if (!reservation1)
-            reservation2 = bce_reserve_submission(urb->q->sq_in, timeout);
-        if (reservation1 || reservation2) {
-            pr_err("bce-vhci: Failed to reserve a submission for URB data transfer\n");
-            if (!reservation1)
-                bce_cancel_submission_reservation(urb->q->sq_in);
-            return -ENOMEM;
-        }
-
-        msg.cmd = BCE_VHCI_MSG_TRANSFER_REQUEST;
-        msg.status = 0;
-        msg.param1 = ((urb->urb->ep->desc.bEndpointAddress & 0x8Fu) << 8) | urb->q->dev_addr;
-        msg.param2 = urb->urb->transfer_buffer_length;
-        bce_vhci_message_queue_write(&urb->q->vhci->msg_asynchronous, &msg);
-
-        s = bce_next_submission(urb->q->sq_in);
-        bce_set_submission_single(s, urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
-        bce_submit_to_device(urb->q->sq_in);
-
-        urb->state = BCE_VHCI_URB_WAITING_FOR_COMPLETION;
-        return 0;
+        return bce_vhci_urb_data_transfer_in(urb, timeout);
     }
 }
 
@@ -261,14 +341,14 @@ static int bce_vhci_urb_send_out_data(struct bce_vhci_urb *urb, dma_addr_t addr,
 
 static int bce_vhci_urb_data_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg)
 {
+    u32 tr_len;
     int status;
     if (urb->state == BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST) {
         if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST) {
-            if (msg->param2 != urb->urb->transfer_buffer_length)
-                pr_err("bce-vhci: Device requested wrong transfer buffer length\n");
-            if ((status = bce_vhci_urb_send_out_data(urb, urb->urb->transfer_dma,
-                    min(urb->urb->transfer_buffer_length, (u32) msg->param2))))
+            tr_len = min(urb->urb->transfer_buffer_length - urb->send_offset, (u32) msg->param2);
+            if ((status = bce_vhci_urb_send_out_data(urb, urb->urb->transfer_dma + urb->send_offset, tr_len)))
                 return status;
+            urb->send_offset += tr_len;
             urb->state = BCE_VHCI_URB_WAITING_FOR_COMPLETION;
             return 0;
         }
@@ -282,10 +362,13 @@ static int bce_vhci_urb_data_update(struct bce_vhci_urb *urb, struct bce_vhci_me
 static int bce_vhci_urb_data_transfer_completion(struct bce_vhci_urb *urb, struct bce_sq_completion_data *c)
 {
     if (urb->state == BCE_VHCI_URB_WAITING_FOR_COMPLETION) {
-        urb->urb->actual_length = (u32) c->data_size;
-        urb->state = BCE_VHCI_URB_DATA_TRANSFER_COMPLETE;
-        if (!urb->is_control)
-            bce_vhci_urb_complete(urb, 0);
+        urb->receive_offset += c->data_size;
+        if (urb->dir == DMA_FROM_DEVICE || urb->receive_offset >= urb->urb->transfer_buffer_length) {
+            urb->urb->actual_length = (u32) urb->receive_offset;
+            urb->state = BCE_VHCI_URB_DATA_TRANSFER_COMPLETE;
+            if (!urb->is_control)
+                bce_vhci_urb_complete(urb, 0);
+        }
     } else {
         pr_err("bce-vhci: Data URB unexpected completion\n");
     }
@@ -376,4 +459,16 @@ static int bce_vhci_urb_transfer_completion(struct bce_vhci_urb *urb, struct bce
         return bce_vhci_urb_control_transfer_completion(urb, c);
     else
         return bce_vhci_urb_data_transfer_completion(urb, c);
+}
+
+static void bce_vhci_urb_resume(struct bce_vhci_urb *urb)
+{
+    int status = 0;
+    if (urb->state == BCE_VHCI_URB_INIT_PAUSED) {
+        bce_vhci_urb_init(urb);
+    } else if (urb->state == BCE_VHCI_URB_WAITING_FOR_COMPLETION) {
+        status = bce_vhci_urb_data_transfer_in(urb, NULL);
+    }
+    if (status)
+        bce_vhci_urb_complete(urb, status);
 }

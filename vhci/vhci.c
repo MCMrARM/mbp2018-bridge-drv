@@ -235,10 +235,17 @@ static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_
 
 static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 {
+    int retval;
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
     if (!q)
         return -ENOENT;
-    return bce_vhci_urb_cancel(q, urb, status);
+    pr_info("bce_vhci_urb_dequeue %x\n", urb->ep->desc.bEndpointAddress);
+    mutex_lock(&q->state_change_mutex);
+    bce_vhci_transfer_queue_pause(q);
+    retval = bce_vhci_urb_cancel(q, urb, status);
+    bce_vhci_transfer_queue_resume(q);
+    mutex_unlock(&q->state_change_mutex);
+    return retval;
 }
 
 static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *endp)
