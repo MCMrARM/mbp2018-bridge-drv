@@ -6,7 +6,7 @@
 #define BCE_VHCI_MSG_TRANSFER_REQUEST 0x1000
 #define BCE_VHCI_MSG_CONTROL_TRANSFER_STATUS 0x1005
 
-static void bce_vhci_control_transfer_queue_completion(struct bce_queue_sq *sq);
+static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq);
 
 static int bce_vhci_urb_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg);
 static int bce_vhci_urb_transfer_completion(struct bce_vhci_urb *urb, struct bce_sq_completion_data *c);
@@ -25,12 +25,12 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL) {
         snprintf(name, sizeof(name), "VHC1-%i-%02x", dev_addr, 0x80 | usb_endpoint_num(&endp->desc));
         q->sq_in = bce_create_sq(vhci->dev, q->cq, name, 0x100, DMA_FROM_DEVICE,
-                bce_vhci_control_transfer_queue_completion, q);
+                                 bce_vhci_transfer_queue_completion, q);
     }
     if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL) {
         snprintf(name, sizeof(name), "VHC1-%i-%02x", dev_addr, usb_endpoint_num(&endp->desc));
         q->sq_out = bce_create_sq(vhci->dev, q->cq, name, 0x100, DMA_TO_DEVICE,
-                                  bce_vhci_control_transfer_queue_completion, q);
+                                  bce_vhci_transfer_queue_completion, q);
     }
 }
 
@@ -109,7 +109,7 @@ complete:
     bce_vhci_transfer_queue_giveback(q);
 }
 
-static void bce_vhci_control_transfer_queue_completion(struct bce_queue_sq *sq)
+static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
 {
     struct bce_sq_completion_data *c;
     struct urb *urb;
@@ -146,7 +146,13 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     vurb->is_control = (usb_endpoint_num(&urb->ep->desc) == 0);
 
     spin_lock(&q->urb_lock);
-    usb_hcd_link_urb_to_ep(q->vhci->hcd, urb);
+    status = usb_hcd_link_urb_to_ep(q->vhci->hcd, urb);
+    if (status) {
+        spin_unlock(&q->urb_lock);
+        urb->hcpriv = NULL;
+        kfree(vurb);
+        return status;
+    }
 
     if (vurb->is_control)
         vurb->state = BCE_VHCI_URB_CONTROL_SETUP;
@@ -161,7 +167,7 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     }
     spin_unlock(&q->urb_lock);
     pr_info("bce-vhci: URB created\n");
-    return 0;
+    return status;
 }
 
 static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
