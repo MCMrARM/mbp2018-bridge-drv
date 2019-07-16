@@ -17,6 +17,8 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
 {
     int status;
 
+    spin_lock_init(&vhci->hcd_spinlock);
+
     vhci->dev = dev;
 
     vhci->vdevt = bce_vhci_chrdev;
@@ -37,6 +39,7 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
         goto fail_hcd;
     }
     vhci->hcd->self.sysdev = &dev->pci->dev;
+    vhci->hcd->self.uses_dma = 1;
     *((struct bce_vhci **) vhci->hcd->hcd_priv) = vhci;
     vhci->hcd->speed = HCD_USB2;
 
@@ -131,6 +134,10 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
 
         if (vhci->port_power_mask & BIT(wIndex))
             ps->wPortStatus |= USB_PORT_STAT_POWER;
+
+        if ((u8) wIndex != 5)
+            return 0;
+
         if (port_status & 16)
             ps->wPortStatus |= USB_PORT_STAT_ENABLE | USB_PORT_STAT_HIGH_SPEED;
         if (port_status & 4)
@@ -143,19 +150,25 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
             ps->wPortStatus |= USB_PORT_STAT_SUSPEND;
 
         if (port_status & 0x40000)
-            ps->wPortStatus |= USB_PORT_STAT_C_CONNECTION;
+            ps->wPortChange |= USB_PORT_STAT_C_CONNECTION;
 
-        // pr_info("bce-vhci: Translated status %x to %x:%x\n", port_status, ps->wPortStatus, ps->wPortChange);
+        pr_info("bce-vhci: Translated status %x to %x:%x\n", port_status, ps->wPortStatus, ps->wPortChange);
         return 0;
     } else if (typeReq == SetPortFeature) {
         if (wValue == USB_PORT_FEAT_POWER) {
             status = bce_vhci_cmd_port_power_on(&vhci->cq, (u8) wIndex);
+            /* As far as I am aware, power status is not part of the port status so store it separately */
             if (!status)
                 vhci->port_power_mask |= BIT(wIndex);
             return status;
         }
-        if (wValue == USB_PORT_FEAT_RESET)
+        if (wValue == USB_PORT_FEAT_RESET) {
+            /* The device does not support being reset more than once, so workaround it */
+            if (vhci->port_reset_mask & BIT(wIndex))
+                return 0;
+            vhci->port_reset_mask |= BIT(wIndex);
             return bce_vhci_cmd_port_reset(&vhci->cq, (u8) wIndex, wValue);
+        }
     } else if (typeReq == ClearPortFeature) {
         if (wValue == USB_PORT_FEAT_ENABLE)
             return bce_vhci_cmd_port_disable(&vhci->cq, (u8) wIndex);
@@ -167,19 +180,89 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
         }
         if (wValue == USB_PORT_FEAT_C_CONNECTION)
             return bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0x40000, &port_status);
-        if (wValue == USB_PORT_FEAT_C_RESET) /* I don't think I can transfer it in any way */
+        if (wValue == USB_PORT_FEAT_C_RESET) { /* I don't think I can transfer it in any way */
             return 0;
-    } else if (typeReq == DeviceRequest | USB_REQ_GET_DESCRIPTOR) {
-        //
+        }
     }
     pr_err("bce-vhci: bce_vhci_hub_control unhandled request: %x %i %i [bufl=%i]\n", typeReq, wValue, wIndex, wLength);
     dump_stack();
     return -EIO;
 }
 
+static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
+{
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    struct bce_vhci_device *vdev;
+    bce_vhci_device_t devid;
+    pr_info("bce_vhci_enable_device\n");
+
+    /* We need to early address the device */
+    if (bce_vhci_cmd_device_create(&vhci->cq, udev->portnum, &devid))
+        return -EIO;
+
+    pr_info("bce_vhci_cmd_device_create %i -> %i\n", udev->portnum, devid);
+
+    vdev = kzalloc(sizeof(struct bce_vhci_device), GFP_KERNEL);
+    vhci->port_to_device[udev->portnum] = devid;
+    vhci->devices[devid] = vdev;
+
+    bce_vhci_create_transfer_queue(vhci, &vdev->tq[0], &udev->ep0, devid, DMA_BIDIRECTIONAL);
+    udev->ep0.hcpriv = &vdev->tq[0];
+    vdev->tq_mask |= BIT(0);
+
+    bce_vhci_cmd_endpoint_create(&vhci->cq, devid, &udev->ep0.desc);
+    return 0;
+}
+
+static int bce_vhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
+{
+    return 0;
+}
+
+static int bce_vhci_check_bandwidth(struct usb_hcd *hcd, struct usb_device *udev)
+{
+    return 0;
+}
+
 static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
 {
-    pr_info("bce_vhci_urb_enqueue\n");
+    struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
+    pr_info("bce_vhci_urb_enqueue %x\n", urb->ep->desc.bEndpointAddress);
+    if (!q)
+        return -ENOENT;
+    return bce_vhci_urb_create(q, urb);
+}
+
+static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
+{
+    struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
+    if (!q)
+        return -ENOENT;
+    return bce_vhci_urb_cancel(q, urb, status);
+}
+
+static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *endp)
+{
+    int endp_no = usb_endpoint_num(&endp->desc);
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    bce_vhci_device_t devid = vhci->port_to_device[udev->portnum];
+    struct bce_vhci_device *vdev = vhci->devices[devid];
+    pr_info("bce_vhci_add_endpoint %x:%x\n", udev->portnum, endp_no);
+
+    if (udev->bus->root_hub == udev) /* The USB hub */
+        return 0;
+    if (vdev == NULL)
+        return -ENODEV;
+    if (vdev->tq_mask & BIT(endp_no))
+        return 0;
+
+    bce_vhci_create_transfer_queue(vhci, &vdev->tq[endp_no], endp, devid,
+            usb_endpoint_dir_in(&endp->desc) ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+    endp->hcpriv = &vdev->tq[endp_no];
+    vdev->tq_mask |= BIT(endp_no);
+
+    bce_vhci_cmd_endpoint_create(&vhci->cq, devid, &endp->desc);
+    return 0;
 }
 
 static int bce_vhci_create_message_queues(struct bce_vhci *vhci)
@@ -252,8 +335,21 @@ static void bce_vhci_handle_system_event(struct bce_vhci_event_queue *q, struct 
 
 static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)
 {
+    bce_vhci_device_t devid;
+    u8 endp;
+    struct bce_vhci_device *dev;
     if (msg->cmd & 0x8000)
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
+    if (msg->cmd == 0x1000 || msg->cmd == 0x1005) {
+        devid = (bce_vhci_device_t) (msg->param1 & 0xff);
+        endp = (u8) ((msg->param1 >> 8) & 0xf);
+        dev = q->vhci->devices[devid];
+        if (!dev || (dev->tq_mask & BIT(endp)) == 0) {
+            pr_err("bce-vhci: Didn't find destination for transfer queue event\n");
+            return;
+        }
+        bce_vhci_transfer_queue_event(&dev->tq[(msg->param1 >> 8) & 0xf], msg);
+    }
 }
 
 
@@ -268,7 +364,12 @@ static const struct hc_driver bce_vhci_driver = {
         .start = bce_vhci_start,
         .hub_status_data = bce_vhci_hub_status_data,
         .hub_control = bce_vhci_hub_control,
-        .urb_enqueue = bce_vhci_urb_enqueue
+        .urb_enqueue = bce_vhci_urb_enqueue,
+        .urb_dequeue = bce_vhci_urb_dequeue,
+        .enable_device = bce_vhci_enable_device,
+        .address_device = bce_vhci_address_device,
+        .add_endpoint = bce_vhci_add_endpoint,
+        .check_bandwidth = bce_vhci_check_bandwidth
 };
 
 
