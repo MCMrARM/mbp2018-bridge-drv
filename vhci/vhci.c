@@ -272,6 +272,20 @@ static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, s
     return 0;
 }
 
+static int bce_vhci_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *endp)
+{
+    int endp_no = usb_endpoint_num(&endp->desc);
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    bce_vhci_device_t devid = vhci->port_to_device[udev->portnum];
+    struct bce_vhci_transfer_queue *q = endp->hcpriv;
+    if (!q)
+        return 0;
+    bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) (endp->desc.bEndpointAddress & 0x8F));
+    vhci->devices[devid]->tq_mask &= ~BIT(endp_no);
+    bce_vhci_destroy_transfer_queue(vhci, q);
+    return 0;
+}
+
 static int bce_vhci_create_message_queues(struct bce_vhci *vhci)
 {
     if (bce_vhci_message_queue_create(vhci, &vhci->msg_commands, "VHC1HostCommands") ||
@@ -376,6 +390,7 @@ static const struct hc_driver bce_vhci_driver = {
         .enable_device = bce_vhci_enable_device,
         .address_device = bce_vhci_address_device,
         .add_endpoint = bce_vhci_add_endpoint,
+        .drop_endpoint = bce_vhci_drop_endpoint,
         .check_bandwidth = bce_vhci_check_bandwidth
 };
 
