@@ -16,6 +16,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
 {
     char name[0x21];
     INIT_LIST_HEAD(&q->evq);
+    INIT_LIST_HEAD(&q->giveback_urb_list);
     spin_lock_init(&q->urb_lock);
     q->vhci = vhci;
     q->endp = endp;
@@ -49,6 +50,21 @@ static void bce_vhci_transfer_queue_defer_event(struct bce_vhci_transfer_queue *
     INIT_LIST_HEAD(&lm->list);
     lm->msg = *msg;
     list_add_tail(&lm->list, &q->evq);
+}
+
+static void bce_vhci_transfer_queue_giveback(struct bce_vhci_transfer_queue *q)
+{
+    struct urb *urb;
+    spin_lock(&q->urb_lock);
+    while (!list_empty(&q->giveback_urb_list)) {
+        urb = list_first_entry(&q->giveback_urb_list, struct urb, urb_list);
+        list_del(&urb->urb_list);
+
+        spin_unlock(&q->urb_lock);
+        usb_hcd_giveback_urb(q->vhci->hcd, urb, urb->status);
+        spin_lock(&q->urb_lock);
+    }
+    spin_unlock(&q->urb_lock);
 }
 
 void bce_vhci_transfer_queue_deliver_pending(struct bce_vhci_transfer_queue *q)
@@ -90,6 +106,7 @@ void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce
 
 complete:
     spin_unlock(&q->urb_lock);
+    bce_vhci_transfer_queue_giveback(q);
 }
 
 static void bce_vhci_control_transfer_queue_completion(struct bce_queue_sq *sq)
@@ -103,13 +120,14 @@ static void bce_vhci_control_transfer_queue_completion(struct bce_queue_sq *sq)
             pr_err("bce-vhci: Got a completion while no requests are pending\n");
             continue;
         }
-        pr_info("bce-vhci:  => got a control queue completion\n");
+        pr_info("bce-vhci:  => got a transfer queue completion\n");
         urb = list_first_entry(&q->endp->urb_list, struct urb, urb_list);
         bce_vhci_urb_transfer_completion(urb->hcpriv, c);
         bce_notify_submission_complete(sq);
     }
     bce_vhci_transfer_queue_deliver_pending(q);
     spin_unlock(&q->urb_lock);
+    bce_vhci_transfer_queue_giveback(q);
 }
 
 
@@ -154,9 +172,9 @@ static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
     pr_info("bce-vhci: URB complete %i\n", status);
     usb_hcd_unlink_urb_from_ep(vhci->hcd, real_urb);
     real_urb->hcpriv = NULL;
+    real_urb->status = status;
     kfree(urb);
-    usb_hcd_giveback_urb(vhci->hcd, real_urb, status);
-    bce_vhci_transfer_queue_deliver_pending(q); /* TODO: Probably not the right place? */
+    list_add(&real_urb->urb_list, &q->giveback_urb_list);
 }
 
 int bce_vhci_urb_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int status)

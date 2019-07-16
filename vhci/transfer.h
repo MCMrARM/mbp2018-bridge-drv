@@ -19,6 +19,7 @@ struct bce_vhci_transfer_queue {
     struct bce_queue_sq *sq_out;
     struct list_head evq;
     struct spinlock urb_lock;
+    struct list_head giveback_urb_list;
 };
 enum bce_vhci_urb_state {
     BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST,
