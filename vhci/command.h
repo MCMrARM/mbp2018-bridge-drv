@@ -34,6 +34,10 @@ enum bce_vhci_command {
     BCE_VHCI_CMD_ENDPOINT_RESET = 0x44
 };
 
+enum bce_vhci_endpoint_state {
+    BCE_VHCI_EDNPOINT_ACTIVE = 0,
+    BCE_VHCI_EDNPOINT_PAUSED = 1
+};
 
 static inline int bce_vhci_cmd_controller_enable(struct bce_vhci_command_queue *q, u8 busNum, u16 *portMask)
 {
@@ -165,6 +169,19 @@ static inline int bce_vhci_cmd_endpoint_destroy(struct bce_vhci_command_queue *q
     cmd.cmd = BCE_VHCI_CMD_ENDPOINT_DESTROY;
     cmd.param1 = dev | (endpoint << 8);
     return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
+}
+static inline int bce_vhci_cmd_endpoint_set_state(struct bce_vhci_command_queue *q, bce_vhci_device_t dev, u8 endpoint,
+        enum bce_vhci_endpoint_state newState, enum bce_vhci_endpoint_state *retState)
+{
+    int status;
+    struct bce_vhci_message cmd, res;
+    cmd.cmd = BCE_VHCI_CMD_ENDPOINT_SET_STATE;
+    cmd.param1 = dev | (endpoint << 8);
+    cmd.param2 = (u64) newState;
+    status = bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
+    if (status != BCE_VHCI_INTERNAL_ERROR && status != BCE_VHCI_NO_POWER)
+        *retState = (enum bce_vhci_endpoint_state) res.param2;
+    return status;
 }
 static inline int bce_vhci_cmd_endpoint_reset(struct bce_vhci_command_queue *q, bce_vhci_device_t dev, u8 endpoint)
 {
