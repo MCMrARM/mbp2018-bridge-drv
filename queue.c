@@ -80,7 +80,7 @@ void bce_handle_cq_completions(struct bce_device *dev, struct bce_queue_cq *cq)
         e = bce_cq_element(cq, cq->index);
         if (!(e->flags & BCE_COMPLETION_FLAG_PENDING))
             break;
-        pr_info("bce: compl: %i: %i %llx %llx", e->qid, e->status, e->data_size, e->result);
+        // pr_info("bce: compl: %i: %i %llx %llx", e->qid, e->status, e->data_size, e->result);
         bce_handle_cq_completion(dev, e, &ce);
         e->flags = 0;
         cq->index = (cq->index + 1) % cq->el_count;
@@ -167,6 +167,7 @@ void *bce_next_submission(struct bce_queue_sq *sq)
 
 void bce_submit_to_device(struct bce_queue_sq *sq)
 {
+    mb();
     iowrite32(sq->tail, (u32 *) ((u8 *) sq->reg_mem_dma +  REG_DOORBELL_BASE) + sq->qid);
 }
 
@@ -255,7 +256,6 @@ static __always_inline void *bce_cmd_start(struct bce_queue_cmdq *cmdq, struct b
 
 static __always_inline void bce_cmd_finish(struct bce_queue_cmdq *cmdq, struct bce_queue_cmdq_result_el *res)
 {
-    mb();
     bce_submit_to_device(cmdq->sq);
     spin_unlock(&cmdq->lck);
 
