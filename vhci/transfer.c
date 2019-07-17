@@ -58,17 +58,18 @@ static void bce_vhci_transfer_queue_defer_event(struct bce_vhci_transfer_queue *
 
 static void bce_vhci_transfer_queue_giveback(struct bce_vhci_transfer_queue *q)
 {
+    unsigned long flags;
     struct urb *urb;
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     while (!list_empty(&q->giveback_urb_list)) {
         urb = list_first_entry(&q->giveback_urb_list, struct urb, urb_list);
         list_del(&urb->urb_list);
 
-        spin_unlock(&q->urb_lock);
+        spin_unlock_irqrestore(&q->urb_lock, flags);
         usb_hcd_giveback_urb(q->vhci->hcd, urb, urb->status);
-        spin_lock(&q->urb_lock);
+        spin_lock_irqsave(&q->urb_lock, flags);
     }
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
 }
 
 void bce_vhci_transfer_queue_deliver_pending(struct bce_vhci_transfer_queue *q)
@@ -89,9 +90,10 @@ void bce_vhci_transfer_queue_deliver_pending(struct bce_vhci_transfer_queue *q)
 
 void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce_vhci_message *msg)
 {
+    unsigned long flags;
     struct bce_vhci_urb *turb;
     struct urb *urb;
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     bce_vhci_transfer_queue_deliver_pending(q);
 
     if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST &&
@@ -109,16 +111,17 @@ void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce
         bce_vhci_transfer_queue_defer_event(q, msg);
 
 complete:
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     bce_vhci_transfer_queue_giveback(q);
 }
 
 static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
 {
+    unsigned long flags;
     struct bce_sq_completion_data *c;
     struct urb *urb;
     struct bce_vhci_transfer_queue *q = sq->userdata;
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     while ((c = bce_next_completion(sq))) {
         if (c->status == BCE_COMPLETION_ABORTED) /* We flushed the queue */
             continue;
@@ -132,28 +135,29 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
         bce_notify_submission_complete(sq);
     }
     bce_vhci_transfer_queue_deliver_pending(q);
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     bce_vhci_transfer_queue_giveback(q);
 }
 
 int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
 {
+    unsigned long flags;
     struct bce_vhci_list_message *lm;
     int status;
     u8 endp_addr = (u8) (q->endp->desc.bEndpointAddress & 0x8F);
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     q->active = false;
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     if (q->sq_out) {
         pr_err("bce-vhci: Not implemented: wait for pending output requests\n");
     }
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     while (!list_empty(&q->evq)) {
         lm = list_first_entry(&q->evq, struct bce_vhci_list_message, list);
         list_del(&lm->list);
         kfree(lm);
     }
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     if ((status = bce_vhci_cmd_endpoint_set_state(
             &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_EDNPOINT_PAUSED, &q->state)))
         return status;
@@ -170,6 +174,7 @@ static void bce_vhci_urb_resume(struct bce_vhci_urb *urb);
 
 int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
 {
+    unsigned long flags;
     int status;
     struct urb *urb, *urbt;
     struct bce_vhci_urb *vurb;
@@ -179,14 +184,14 @@ int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
         return status;
     if (q->state != BCE_VHCI_EDNPOINT_ACTIVE)
         return -EINVAL;
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     q->active = true;
     list_for_each_entry_safe(urb, urbt, &q->endp->urb_list, urb_list) {
         vurb = urb->hcpriv;
         bce_vhci_urb_resume(vurb);
     }
     bce_vhci_transfer_queue_deliver_pending(q);
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     return 0;
 }
 
@@ -196,6 +201,7 @@ static int bce_vhci_urb_data_start(struct bce_vhci_urb *urb, unsigned long *time
 
 int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
 {
+    unsigned long flags;
     int status = 0;
     struct bce_vhci_urb *vurb;
     vurb = kzalloc(sizeof(struct bce_vhci_urb), GFP_KERNEL);
@@ -206,10 +212,10 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     vurb->dir = usb_urb_dir_in(urb) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
     vurb->is_control = (usb_endpoint_num(&urb->ep->desc) == 0);
 
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     status = usb_hcd_link_urb_to_ep(q->vhci->hcd, urb);
     if (status) {
-        spin_unlock(&q->urb_lock);
+        spin_unlock_irqrestore(&q->urb_lock, flags);
         urb->hcpriv = NULL;
         kfree(vurb);
         return status;
@@ -226,8 +232,7 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     } else {
         bce_vhci_transfer_queue_deliver_pending(q);
     }
-    spin_unlock(&q->urb_lock);
-    pr_info("bce-vhci: URB created\n");
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     return status;
 }
 
@@ -256,18 +261,19 @@ static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
 
 int bce_vhci_urb_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int status)
 {
+    unsigned long flags;
     int ret = 0;
     struct bce_vhci_urb *vurb;
     pr_info("bce-vhci: URB cancel\n");
-    spin_lock(&q->urb_lock);
+    spin_lock_irqsave(&q->urb_lock, flags);
     if ((ret = usb_hcd_check_unlink_urb(q->vhci->hcd, urb, status))) {
-        spin_unlock(&q->urb_lock);
+        spin_unlock_irqrestore(&q->urb_lock, flags);
         return ret;
     }
     vurb = urb->hcpriv;
     usb_hcd_unlink_urb_from_ep(q->vhci->hcd, urb);
     bce_vhci_transfer_queue_deliver_pending(q); /* TODO: Probably not the right place? */
-    spin_unlock(&q->urb_lock);
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     kfree(vurb);
     usb_hcd_giveback_urb(q->vhci->hcd, urb, status);
     return ret;
