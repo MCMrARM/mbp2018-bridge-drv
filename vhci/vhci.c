@@ -248,25 +248,34 @@ static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status
     return retval;
 }
 
+static u8 bce_vhci_endpoint_index(u8 addr)
+{
+    if (addr & 0x80)
+        return (u8) (0x10 + addr & 0xf);
+    return (u8) (addr & 0xf);
+}
+
 static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *endp)
 {
-    int endp_no = usb_endpoint_num(&endp->desc);
+    u8 endp_index = bce_vhci_endpoint_index(endp->desc.bEndpointAddress);
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
     bce_vhci_device_t devid = vhci->port_to_device[udev->portnum];
     struct bce_vhci_device *vdev = vhci->devices[devid];
-    pr_info("bce_vhci_add_endpoint %x:%x\n", udev->portnum, endp_no);
+    pr_info("bce_vhci_add_endpoint %x:%x\n", udev->portnum, endp_index);
 
     if (udev->bus->root_hub == udev) /* The USB hub */
         return 0;
     if (vdev == NULL)
         return -ENODEV;
-    if (vdev->tq_mask & BIT(endp_no))
+    if (vdev->tq_mask & BIT(endp_index)) {
+        endp->hcpriv = &vdev->tq[endp_index];
         return 0;
+    }
 
-    bce_vhci_create_transfer_queue(vhci, &vdev->tq[endp_no], endp, devid,
+    bce_vhci_create_transfer_queue(vhci, &vdev->tq[endp_index], endp, devid,
             usb_endpoint_dir_in(&endp->desc) ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
-    endp->hcpriv = &vdev->tq[endp_no];
-    vdev->tq_mask |= BIT(endp_no);
+    endp->hcpriv = &vdev->tq[endp_index];
+    vdev->tq_mask |= BIT(endp_index);
 
     bce_vhci_cmd_endpoint_create(&vhci->cq, devid, &endp->desc);
     return 0;
@@ -274,15 +283,25 @@ static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, s
 
 static int bce_vhci_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *endp)
 {
-    int endp_no = usb_endpoint_num(&endp->desc);
+    u8 endp_index = bce_vhci_endpoint_index(endp->desc.bEndpointAddress);
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
     bce_vhci_device_t devid = vhci->port_to_device[udev->portnum];
     struct bce_vhci_transfer_queue *q = endp->hcpriv;
-    if (!q)
-        return 0;
+    struct bce_vhci_device *vdev = vhci->devices[devid];
+    pr_info("bce_vhci_drop_endpoint %x:%x\n", udev->portnum, endp_index);
+    if (!q) {
+        if (vdev && vdev->tq_mask & BIT(endp_index)) {
+            pr_err("something deleted the hcpriv?\n");
+            q = &vdev->tq[endp_index];
+        } else {
+            return 0;
+        }
+    }
+    /*
     bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) (endp->desc.bEndpointAddress & 0x8F));
-    vhci->devices[devid]->tq_mask &= ~BIT(endp_no);
+    vhci->devices[devid]->tq_mask &= ~BIT(endp_index);
     bce_vhci_destroy_transfer_queue(vhci, q);
+    */
     return 0;
 }
 
@@ -363,13 +382,13 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
     if (msg->cmd == 0x1000 || msg->cmd == 0x1005) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
-        endp = (u8) ((msg->param1 >> 8) & 0xf);
+        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
         dev = q->vhci->devices[devid];
         if (!dev || (dev->tq_mask & BIT(endp)) == 0) {
             pr_err("bce-vhci: Didn't find destination for transfer queue event\n");
             return;
         }
-        bce_vhci_transfer_queue_event(&dev->tq[(msg->param1 >> 8) & 0xf], msg);
+        bce_vhci_transfer_queue_event(&dev->tq[endp], msg);
     }
 }
 

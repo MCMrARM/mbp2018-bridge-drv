@@ -8,8 +8,8 @@ struct usb_hcd;
 struct bce_queue_cq;
 
 struct bce_vhci_device {
-    struct bce_vhci_transfer_queue tq[16];
-    u8 tq_mask;
+    struct bce_vhci_transfer_queue tq[32];
+    u32 tq_mask;
 };
 struct bce_vhci {
     struct bce_device *dev;
