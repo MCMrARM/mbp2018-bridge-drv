@@ -16,6 +16,7 @@ struct bce_vhci_transfer_queue {
     enum bce_vhci_endpoint_state state;
     bool active;
     bce_vhci_device_t dev_addr;
+    u8 endp_addr;
     struct bce_queue_cq *cq;
     struct bce_queue_sq *sq_in;
     struct bce_queue_sq *sq_out;

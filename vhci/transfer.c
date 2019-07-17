@@ -23,6 +23,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     q->vhci = vhci;
     q->endp = endp;
     q->dev_addr = dev_addr;
+    q->endp_addr = (u8) (endp->desc.bEndpointAddress & 0x8F);
     q->state = BCE_VHCI_EDNPOINT_ACTIVE;
     q->active = true;
     q->cq = bce_create_cq(vhci->dev, 0x100);
@@ -102,7 +103,7 @@ void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce
         goto complete;
     }
     if (list_empty(&q->endp->urb_list)) {
-        pr_err("bce-vhci: Unexpected control queue event\n");
+        pr_err("bce-vhci: [%02x] Unexpected transfer queue event\n", q->endp_addr);
         goto complete;
     }
     urb = list_first_entry(&q->endp->urb_list, struct urb, urb_list);
@@ -123,13 +124,15 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     struct bce_vhci_transfer_queue *q = sq->userdata;
     spin_lock_irqsave(&q->urb_lock, flags);
     while ((c = bce_next_completion(sq))) {
-        if (c->status == BCE_COMPLETION_ABORTED) /* We flushed the queue */
-            continue;
-        if (list_empty(&q->endp->urb_list)) {
-            pr_err("bce-vhci: Got a completion while no requests are pending\n");
+        if (c->status == BCE_COMPLETION_ABORTED) { /* We flushed the queue */
+            pr_debug("bce-vhci: [%02x] Got an abort completion\n", q->endp_addr);
             continue;
         }
-        pr_info("bce-vhci:  => got a transfer queue completion\n");
+        if (list_empty(&q->endp->urb_list)) {
+            pr_err("bce-vhci: [%02x] Got a completion while no requests are pending\n", q->endp_addr);
+            continue;
+        }
+        pr_debug("bce-vhci: [%02x] Got a transfer queue completion\n", q->endp_addr);
         urb = list_first_entry(&q->endp->urb_list, struct urb, urb_list);
         bce_vhci_urb_transfer_completion(urb->hcpriv, c);
         bce_notify_submission_complete(sq);
@@ -233,6 +236,8 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
         bce_vhci_transfer_queue_deliver_pending(q);
     }
     spin_unlock_irqrestore(&q->urb_lock, flags);
+    pr_debug("bce-vhci: [%02x] URB enqueued (dir = %s, size = %i)\n", q->endp_addr,
+            usb_urb_dir_in(urb) ? "IN" : "OUT", urb->transfer_buffer_length);
     return status;
 }
 
@@ -251,7 +256,7 @@ static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
     struct bce_vhci_transfer_queue *q = urb->q;
     struct bce_vhci *vhci = q->vhci;
     struct urb *real_urb = urb->urb;
-    pr_info("bce-vhci: URB complete %i\n", status);
+    pr_debug("bce-vhci: [%02x] URB complete %i\n", q->endp_addr, status);
     usb_hcd_unlink_urb_from_ep(vhci->hcd, real_urb);
     real_urb->hcpriv = NULL;
     real_urb->status = status;
@@ -286,7 +291,8 @@ static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long
     u32 tr_len;
     int reservation1, reservation2 = -EFAULT;
 
-    pr_info("bce-vhci: DMA from device %llx %x\n", urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
+    pr_debug("bce-vhci: [%02x] DMA from device %llx %x\n", urb->q->endp_addr,
+            urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
 
     /* Reserve both a message and a submission, so we don't run into issues later. */
     reservation1 = bce_reserve_submission(urb->q->vhci->msg_asynchronous.sq, timeout);
@@ -339,6 +345,8 @@ static int bce_vhci_urb_send_out_data(struct bce_vhci_urb *urb, dma_addr_t addr,
         return -EPIPE;
     }
 
+    pr_debug("bce-vhci: [%02x] DMA to device %llx %x\n", urb->q->endp_addr, addr, size);
+
     s = bce_next_submission(urb->q->sq_out);
     bce_set_submission_single(s, addr, size);
     bce_submit_to_device(urb->q->sq_out);
@@ -359,8 +367,8 @@ static int bce_vhci_urb_data_update(struct bce_vhci_urb *urb, struct bce_vhci_me
             return 0;
         }
     }
-    pr_err("bce-vhci: %s URB unexpected message (state = %x, msg: %x %x %x %llx)\n",
-            (urb->is_control ? "Control (data update)" : "Data"), urb->state,
+    pr_err("bce-vhci: [%02x] %s URB unexpected message (state = %x, msg: %x %x %x %llx)\n",
+            urb->q->endp_addr, (urb->is_control ? "Control (data update)" : "Data"), urb->state,
             msg->cmd, msg->status, msg->param1, msg->param2);
     return -EAGAIN;
 }
@@ -376,7 +384,7 @@ static int bce_vhci_urb_data_transfer_completion(struct bce_vhci_urb *urb, struc
                 bce_vhci_urb_complete(urb, 0);
         }
     } else {
-        pr_err("bce-vhci: Data URB unexpected completion\n");
+        pr_err("bce-vhci: [%02x] Data URB unexpected completion\n", urb->q->endp_addr);
     }
     return 0;
 }
@@ -406,10 +414,10 @@ static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci
     if (urb->state == BCE_VHCI_URB_CONTROL_SETUP) {
         if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST) {
             if (bce_vhci_urb_send_out_data(urb, urb->urb->setup_dma, sizeof(struct usb_ctrlrequest))) {
-                pr_err("bce-vhci: Failed to start URB setup transfer\n");
+                pr_err("bce-vhci: [%02x] Failed to start URB setup transfer\n", urb->q->endp_addr);
                 return 0; /* TODO: fail the URB? */
             }
-            pr_info("bce-vhci: Sent setup %llx\n", urb->urb->setup_dma);
+            pr_debug("bce-vhci: [%02x] Sent setup %llx\n", urb->q->endp_addr, urb->urb->setup_dma);
             return 0;
         }
     } else if (urb->state == BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST ||
@@ -418,8 +426,8 @@ static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci
             return status;
         return bce_vhci_urb_control_check_status(urb);
     }
-    pr_err("bce-vhci: Control URB unexpected message (state = %x, msg: %x %x %x %llx)\n", urb->state,
-            msg->cmd, msg->status, msg->param1, msg->param2);
+    pr_err("bce-vhci: [%02x] Control URB unexpected message (state = %x, msg: %x %x %x %llx)\n", urb->q->endp_addr,
+            urb->state, msg->cmd, msg->status, msg->param1, msg->param2);
     return -EAGAIN;
 }
 
@@ -430,8 +438,8 @@ static int bce_vhci_urb_control_transfer_completion(struct bce_vhci_urb *urb, st
 
     if (urb->state == BCE_VHCI_URB_CONTROL_SETUP) {
         if (c->data_size != sizeof(struct usb_ctrlrequest))
-            pr_err("bce-vhci: transfer complete data size mistmatch for usb_ctrlrequest (%llx instead of %lx)\n",
-                    c->data_size, sizeof(struct usb_ctrlrequest));
+            pr_err("bce-vhci: [%02x] transfer complete data size mistmatch for usb_ctrlrequest (%llx instead of %lx)\n",
+                   urb->q->endp_addr, c->data_size, sizeof(struct usb_ctrlrequest));
 
         timeout = 1000;
         status = bce_vhci_urb_data_start(urb, &timeout);
@@ -446,7 +454,7 @@ static int bce_vhci_urb_control_transfer_completion(struct bce_vhci_urb *urb, st
             return status;
         return bce_vhci_urb_control_check_status(urb);
     } else {
-        pr_err("bce-vhci: Control URB unexpected completion (state = %x)\n", urb->state);
+        pr_err("bce-vhci: [%02x] Control URB unexpected completion (state = %x)\n", urb->q->endp_addr, urb->state);
     }
     return 0;
 }
