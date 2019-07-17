@@ -244,7 +244,7 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
 static int bce_vhci_urb_init(struct bce_vhci_urb *vurb)
 {
     if (vurb->is_control) {
-        vurb->state = BCE_VHCI_URB_CONTROL_SETUP;
+        vurb->state = BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST;
         return 0;
     } else {
         return bce_vhci_urb_data_start(vurb, NULL);
@@ -399,7 +399,8 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
     if (urb->received_status == 0)
         return 0;
     if (urb->state == BCE_VHCI_URB_DATA_TRANSFER_COMPLETE ||
-        (urb->received_status != BCE_VHCI_SUCCESS && urb->state != BCE_VHCI_URB_CONTROL_SETUP)) {
+        (urb->received_status != BCE_VHCI_SUCCESS && urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST &&
+        urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION)) {
         urb->state = BCE_VHCI_URB_CONTROL_COMPLETE;
         bce_vhci_urb_complete(urb, 0);
         return -ENOENT;
@@ -415,12 +416,13 @@ static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci
         return bce_vhci_urb_control_check_status(urb);
     }
 
-    if (urb->state == BCE_VHCI_URB_CONTROL_SETUP) {
+    if (urb->state == BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST) {
         if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST) {
             if (bce_vhci_urb_send_out_data(urb, urb->urb->setup_dma, sizeof(struct usb_ctrlrequest))) {
                 pr_err("bce-vhci: [%02x] Failed to start URB setup transfer\n", urb->q->endp_addr);
                 return 0; /* TODO: fail the URB? */
             }
+            urb->state = BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION;
             pr_debug("bce-vhci: [%02x] Sent setup %llx\n", urb->q->endp_addr, urb->urb->setup_dma);
             return 0;
         }
@@ -444,7 +446,7 @@ static int bce_vhci_urb_control_transfer_completion(struct bce_vhci_urb *urb, st
     int status;
     unsigned long timeout;
 
-    if (urb->state == BCE_VHCI_URB_CONTROL_SETUP) {
+    if (urb->state == BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION) {
         if (c->data_size != sizeof(struct usb_ctrlrequest))
             pr_err("bce-vhci: [%02x] transfer complete data size mistmatch for usb_ctrlrequest (%llx instead of %lx)\n",
                    urb->q->endp_addr, c->data_size, sizeof(struct usb_ctrlrequest));
