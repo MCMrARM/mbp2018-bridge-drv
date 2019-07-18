@@ -251,7 +251,7 @@ static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status
 static u8 bce_vhci_endpoint_index(u8 addr)
 {
     if (addr & 0x80)
-        return (u8) (0x10 + addr & 0xf);
+        return (u8) (0x10 + (addr & 0xf));
     return (u8) (addr & 0xf);
 }
 
@@ -261,7 +261,7 @@ static int bce_vhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, s
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
     bce_vhci_device_t devid = vhci->port_to_device[udev->portnum];
     struct bce_vhci_device *vdev = vhci->devices[devid];
-    pr_info("bce_vhci_add_endpoint %x:%x\n", udev->portnum, endp_index);
+    pr_info("bce_vhci_add_endpoint %x/%x:%x\n", udev->portnum, devid, endp_index);
 
     if (udev->bus->root_hub == udev) /* The USB hub */
         return 0;
