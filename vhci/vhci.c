@@ -224,6 +224,11 @@ static int bce_vhci_check_bandwidth(struct usb_hcd *hcd, struct usb_device *udev
     return 0;
 }
 
+static int bce_vhci_get_frame_number(struct usb_hcd *hcd)
+{
+    return 0;
+}
+
 static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
 {
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
@@ -410,7 +415,8 @@ static const struct hc_driver bce_vhci_driver = {
         .address_device = bce_vhci_address_device,
         .add_endpoint = bce_vhci_add_endpoint,
         .drop_endpoint = bce_vhci_drop_endpoint,
-        .check_bandwidth = bce_vhci_check_bandwidth
+        .check_bandwidth = bce_vhci_check_bandwidth,
+        .get_frame_number = bce_vhci_get_frame_number
 };
 
 
