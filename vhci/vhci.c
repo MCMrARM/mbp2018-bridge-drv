@@ -390,20 +390,35 @@ static void bce_vhci_send_fw_event_response(struct bce_vhci *vhci, struct bce_vh
 
 static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci_message *msg)
 {
+    unsigned long flags;
     bce_vhci_device_t devid;
     u8 endp;
     struct bce_vhci_device *dev;
-    if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE) { /* Request state */
+    struct bce_vhci_transfer_queue *tq;
+    if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE || msg->cmd == BCE_VHCI_CMD_ENDPOINT_SET_STATE) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
         endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
         dev = vhci->devices[devid];
         if (!dev || !(dev->tq_mask & BIT(endp)))
             return BCE_VHCI_BAD_ARGUMENT;
+        tq = &dev->tq[endp];
+    }
+
+    if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE) {
         if (msg->param2 == BCE_VHCI_ENDPOINT_ACTIVE) {
-            bce_vhci_transfer_queue_resume(&dev->tq[endp]);
+            bce_vhci_transfer_queue_resume(tq);
             return BCE_VHCI_SUCCESS;
         } else if (msg->param2 == BCE_VHCI_ENDPOINT_PAUSED) {
-            bce_vhci_transfer_queue_pause(&dev->tq[endp]);
+            bce_vhci_transfer_queue_pause(tq);
+            return BCE_VHCI_SUCCESS;
+        }
+        return BCE_VHCI_BAD_ARGUMENT;
+    } else if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_SET_STATE) {
+        if (msg->param2 == BCE_VHCI_ENDPOINT_STALLED) {
+            tq->state = msg->param2;
+            spin_lock_irqsave(&tq->urb_lock, flags);
+            tq->active = false;
+            spin_unlock_irqrestore(&tq->urb_lock, flags);
             return BCE_VHCI_SUCCESS;
         }
         return BCE_VHCI_BAD_ARGUMENT;
@@ -432,7 +447,7 @@ static void bce_vhci_handle_firmware_events_w(struct work_struct *ws)
         }
 
         pr_debug("bce-vhci: Got fw event: %x s=%x p1=%x p2=%llx\n", msg->cmd, msg->status, msg->param1, msg->param2);
-        if (bce_next_completion(sq) != NULL) {
+        if (bce_next_completion(sq)) {
             msg2 = &vhci->ev_commands.data[(sq->head + 1) % sq->el_count];
             pr_debug("bce-vhci: Got second fw event: %x s=%x p1=%x p2=%llx\n",
                     msg->cmd, msg->status, msg->param1, msg->param2);
@@ -447,7 +462,7 @@ static void bce_vhci_handle_firmware_events_w(struct work_struct *ws)
                 continue;
             }
 
-            pr_warn("bce-vhci: Handle fw event - unexpected cancellation");
+            pr_warn("bce-vhci: Handle fw event - unexpected cancellation\n");
         }
 
         result = bce_vhci_handle_firmware_event(vhci, msg);
