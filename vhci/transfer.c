@@ -261,7 +261,7 @@ static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
     real_urb->hcpriv = NULL;
     real_urb->status = status;
     kfree(urb);
-    list_add(&real_urb->urb_list, &q->giveback_urb_list);
+    list_add_tail(&real_urb->urb_list, &q->giveback_urb_list);
 }
 
 int bce_vhci_urb_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int status)
@@ -301,7 +301,7 @@ static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long
     if (reservation1 || reservation2) {
         pr_err("bce-vhci: Failed to reserve a submission for URB data transfer\n");
         if (!reservation1)
-            bce_cancel_submission_reservation(urb->q->sq_in);
+            bce_cancel_submission_reservation(urb->q->vhci->msg_asynchronous.sq);
         return -ENOMEM;
     }
 
@@ -384,8 +384,10 @@ static int bce_vhci_urb_data_transfer_completion(struct bce_vhci_urb *urb, struc
         if (urb->dir == DMA_FROM_DEVICE || urb->receive_offset >= urb->urb->transfer_buffer_length) {
             urb->urb->actual_length = (u32) urb->receive_offset;
             urb->state = BCE_VHCI_URB_DATA_TRANSFER_COMPLETE;
-            if (!urb->is_control)
+            if (!urb->is_control) {
                 bce_vhci_urb_complete(urb, 0);
+                return -ENOENT;
+            }
         }
     } else {
         pr_err("bce-vhci: [%02x] Data URB unexpected completion\n", urb->q->endp_addr);
