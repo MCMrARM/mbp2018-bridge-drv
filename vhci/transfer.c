@@ -215,7 +215,8 @@ static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
     bce_vhci_transfer_queue_resume(q);
 }
 
-void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q) {
+void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q)
+{
     queue_work(q->vhci->tq_state_wq, &q->w_reset);
 }
 
@@ -464,6 +465,7 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
         urb->state = BCE_VHCI_URB_CONTROL_COMPLETE;
         if (urb->received_status != BCE_VHCI_SUCCESS) {
             pr_err("bce-vhci: [%02x] URB failed: %x\n", urb->q->endp_addr, urb->received_status);
+            urb->q->active = false;
             bce_vhci_transfer_queue_request_reset(urb->q);
             bce_vhci_urb_complete(urb, -EPIPE);
             return -ENOENT;
