@@ -50,7 +50,7 @@ void bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_v
     struct bce_qe_submission *s;
     sidx = q->sq->tail;
     s = bce_next_submission(q->sq);
-    pr_debug("bce-vhci: Send message: %x %x %x %llx\n", req->status, req->cmd, req->param1, req->param2);
+    pr_debug("bce-vhci: Send message: %x s=%x p1=%x p2=%llx\n", req->cmd, req->status, req->param1, req->param2);
     q->data[sidx] = *req;
     bce_set_submission_single(s,q->dma_addr + sizeof(struct bce_vhci_message) * sidx,
             sizeof(struct bce_vhci_message));
@@ -107,9 +107,7 @@ static void bce_vhci_event_queue_completion(struct bce_queue_sq *sq)
 
     while (bce_next_completion(sq)) {
         msg = &ev->data[sq->head];
-        if (msg->cmd != 0x18) {
-            pr_debug("bce-vhci: Got event: %x %x %x %llx\n", msg->status, msg->cmd, msg->param1, msg->param2);
-        }
+        pr_debug("bce-vhci: Got event: %x s=%x p1=%x p2=%llx\n", msg->cmd, msg->status, msg->param1, msg->param2);
         ev->cb(ev, msg);
 
         bce_notify_submission_complete(sq);
