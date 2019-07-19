@@ -348,7 +348,7 @@ static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long
     int reservation1, reservation2 = -EFAULT;
 
     pr_debug("bce-vhci: [%02x] DMA from device %llx %x\n", urb->q->endp_addr,
-            urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
+             (u64) urb->urb->transfer_dma, urb->urb->transfer_buffer_length);
 
     /* Reserve both a message and a submission, so we don't run into issues later. */
     reservation1 = bce_reserve_submission(urb->q->vhci->msg_asynchronous.sq, timeout);
@@ -403,7 +403,7 @@ static int bce_vhci_urb_send_out_data(struct bce_vhci_urb *urb, dma_addr_t addr,
         return -EPIPE;
     }
 
-    pr_debug("bce-vhci: [%02x] DMA to device %llx %x\n", urb->q->endp_addr, addr, size);
+    pr_debug("bce-vhci: [%02x] DMA to device %llx %lx\n", urb->q->endp_addr, (u64) addr, size);
 
     s = bce_next_submission(urb->q->sq_out);
     bce_set_submission_single(s, addr, size);
