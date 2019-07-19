@@ -323,9 +323,9 @@ int bce_vhci_urb_request_cancel(struct bce_vhci_transfer_queue *q, struct urb *u
     unsigned long flags;
     int ret;
 
-    /* Quick check to try to avoid pausing */
+    /* Quick check to try to avoid pausing; must past 0 as status we won't be able to call it again. */
     spin_lock_irqsave(&q->urb_lock, flags);
-    if ((ret = usb_hcd_check_unlink_urb(q->vhci->hcd, urb, status))) {
+    if ((ret = usb_hcd_check_unlink_urb(q->vhci->hcd, urb, 0))) {
         spin_unlock_irqrestore(&q->urb_lock, flags);
         return ret;
     }
