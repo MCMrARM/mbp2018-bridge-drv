@@ -229,7 +229,7 @@ static int bce_vhci_get_frame_number(struct usb_hcd *hcd)
 static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
 {
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
-    pr_info("bce_vhci_urb_enqueue %x\n", urb->ep->desc.bEndpointAddress);
+    pr_debug("bce_vhci_urb_enqueue %x\n", urb->ep->desc.bEndpointAddress);
     if (!q)
         return -ENOENT;
     return bce_vhci_urb_create(q, urb);
