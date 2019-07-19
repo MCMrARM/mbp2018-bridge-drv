@@ -166,6 +166,11 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
             vhci->port_reset_mask |= BIT(wIndex);
             return bce_vhci_cmd_port_reset(&vhci->cq, (u8) wIndex, wValue);
         }
+        if (wValue == USB_PORT_FEAT_SUSPEND) {
+            /* TODO: Am I supposed to also suspend the endpoints? */
+            pr_info("bce-vhci: Suspending port %i\n", wIndex);
+            return bce_vhci_cmd_port_suspend(&vhci->cq, (u8) wIndex);
+        }
     } else if (typeReq == ClearPortFeature) {
         if (wValue == USB_PORT_FEAT_ENABLE)
             return bce_vhci_cmd_port_disable(&vhci->cq, (u8) wIndex);
@@ -179,6 +184,10 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
             return bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0x40000, &port_status);
         if (wValue == USB_PORT_FEAT_C_RESET) { /* I don't think I can transfer it in any way */
             return 0;
+        }
+        if (wValue == USB_PORT_FEAT_SUSPEND) {
+            pr_info("bce-vhci: Resuming port %i\n", wIndex);
+            return bce_vhci_cmd_port_resume(&vhci->cq, (u8) wIndex);
         }
     }
     pr_err("bce-vhci: bce_vhci_hub_control unhandled request: %x %i %i [bufl=%i]\n", typeReq, wValue, wIndex, wLength);
