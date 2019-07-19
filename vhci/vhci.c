@@ -376,13 +376,18 @@ static void bce_vhci_destroy_event_queues(struct bce_vhci *vhci)
 
 static void bce_vhci_handle_firmware_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)
 {
-    //
+    pr_warn("bce-vhci: Unhandled firmware event: %x s=%x p1=%x p2=%llx\n",
+            msg->cmd, msg->status, msg->param1, msg->param2);
 }
 
 static void bce_vhci_handle_system_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)
 {
-    if (msg->cmd & 0x8000)
+    if (msg->cmd & 0x8000) {
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
+    } else {
+        pr_warn("bce-vhci: Unhandled system event: %x s=%x p1=%x p2=%llx\n",
+                msg->cmd, msg->status, msg->param1, msg->param2);
+    }
 }
 
 static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)
@@ -390,9 +395,9 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
     bce_vhci_device_t devid;
     u8 endp;
     struct bce_vhci_device *dev;
-    if (msg->cmd & 0x8000)
+    if (msg->cmd & 0x8000) {
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
-    if (msg->cmd == 0x1000 || msg->cmd == 0x1005) {
+    } else if (msg->cmd == 0x1000 || msg->cmd == 0x1005) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
         endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
         dev = q->vhci->devices[devid];
@@ -401,6 +406,9 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
             return;
         }
         bce_vhci_transfer_queue_event(&dev->tq[endp], msg);
+    } else {
+        pr_warn("bce-vhci: Unhandled USB event: %x s=%x p1=%x p2=%llx\n",
+                msg->cmd, msg->status, msg->param1, msg->param2);
     }
 }
 
