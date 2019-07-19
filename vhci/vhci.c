@@ -317,6 +317,7 @@ static int bce_vhci_create_message_queues(struct bce_vhci *vhci)
         bce_vhci_destroy_message_queues(vhci);
         return -EINVAL;
     }
+    spin_lock_init(&vhci->msg_asynchronous_lock);
     bce_vhci_command_queue_create(&vhci->cq, &vhci->msg_commands);
     return 0;
 }

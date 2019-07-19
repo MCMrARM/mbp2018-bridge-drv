@@ -309,11 +309,13 @@ static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long
 
     tr_len = urb->urb->transfer_buffer_length - urb->send_offset;
 
+    spin_lock(&urb->q->vhci->msg_asynchronous_lock);
     msg.cmd = BCE_VHCI_MSG_TRANSFER_REQUEST;
     msg.status = 0;
     msg.param1 = ((urb->urb->ep->desc.bEndpointAddress & 0x8Fu) << 8) | urb->q->dev_addr;
     msg.param2 = tr_len;
     bce_vhci_message_queue_write(&urb->q->vhci->msg_asynchronous, &msg);
+    spin_unlock(&urb->q->vhci->msg_asynchronous_lock);
 
     s = bce_next_submission(urb->q->sq_in);
     bce_set_submission_single(s, urb->urb->transfer_dma + urb->send_offset, tr_len);
