@@ -427,7 +427,7 @@ static int bce_vhci_urb_data_update(struct bce_vhci_urb *urb, struct bce_vhci_me
     }
 
     /* 0x1000 in out queues aren't really unexpected */
-    if (msg->cmd == 0x1000 && urb->q->sq_out != NULL)
+    if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST && urb->q->sq_out != NULL)
         return -EAGAIN;
     pr_err("bce-vhci: [%02x] %s URB unexpected message (state = %x, msg: %x %x %x %llx)\n",
             urb->q->endp_addr, (urb->is_control ? "Control (data update)" : "Data"), urb->state,
@@ -497,7 +497,7 @@ static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci
     }
 
     /* 0x1000 in out queues aren't really unexpected */
-    if (msg->cmd == 0x1000 && urb->q->sq_out != NULL)
+    if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST && urb->q->sq_out != NULL)
         return -EAGAIN;
     pr_err("bce-vhci: [%02x] Control URB unexpected message (state = %x, msg: %x %x %x %llx)\n", urb->q->endp_addr,
             urb->state, msg->cmd, msg->status, msg->param1, msg->param2);
