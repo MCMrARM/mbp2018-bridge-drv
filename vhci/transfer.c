@@ -403,6 +403,8 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
     if (urb->state == BCE_VHCI_URB_DATA_TRANSFER_COMPLETE ||
         (urb->received_status != BCE_VHCI_SUCCESS && urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST &&
         urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION)) {
+        if (urb->received_status != BCE_VHCI_SUCCESS)
+            pr_err("bce-vhci: [%02x] URB failed: %x\n", urb->q->endp_addr, urb->received_status);
         urb->state = BCE_VHCI_URB_CONTROL_COMPLETE;
         bce_vhci_urb_complete(urb, 0);
         return -ENOENT;
