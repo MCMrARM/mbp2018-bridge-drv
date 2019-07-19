@@ -35,8 +35,8 @@ enum bce_vhci_command {
 };
 
 enum bce_vhci_endpoint_state {
-    BCE_VHCI_EDNPOINT_ACTIVE = 0,
-    BCE_VHCI_EDNPOINT_PAUSED = 1
+    BCE_VHCI_ENDPOINT_ACTIVE = 0,
+    BCE_VHCI_ENDPOINT_PAUSED = 1
 };
 
 static inline int bce_vhci_cmd_controller_enable(struct bce_vhci_command_queue *q, u8 busNum, u16 *portMask)

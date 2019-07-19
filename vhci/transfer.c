@@ -25,7 +25,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     q->endp = endp;
     q->dev_addr = dev_addr;
     q->endp_addr = (u8) (endp->desc.bEndpointAddress & 0x8F);
-    q->state = BCE_VHCI_EDNPOINT_ACTIVE;
+    q->state = BCE_VHCI_ENDPOINT_ACTIVE;
     q->active = true;
     q->cq = bce_create_cq(vhci->dev, 0x100);
     INIT_WORK(&q->w_reset, bce_vhci_transfer_queue_reset_w);
@@ -170,9 +170,9 @@ int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
     }
     bce_vhci_transfer_queue_remove_pending(q);
     if ((status = bce_vhci_cmd_endpoint_set_state(
-            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_EDNPOINT_PAUSED, &q->state)))
+            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_ENDPOINT_PAUSED, &q->state)))
         return status;
-    if (q->state != BCE_VHCI_EDNPOINT_PAUSED)
+    if (q->state != BCE_VHCI_ENDPOINT_PAUSED)
         return -EINVAL;
     if (q->sq_in)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_in->qid);
@@ -191,9 +191,9 @@ int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
     struct bce_vhci_urb *vurb;
     u8 endp_addr = (u8) (q->endp->desc.bEndpointAddress & 0x8F);
     if ((status = bce_vhci_cmd_endpoint_set_state(
-            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_EDNPOINT_ACTIVE, &q->state)))
+            &q->vhci->cq, q->dev_addr, endp_addr, BCE_VHCI_ENDPOINT_ACTIVE, &q->state)))
         return status;
-    if (q->state != BCE_VHCI_EDNPOINT_ACTIVE)
+    if (q->state != BCE_VHCI_ENDPOINT_ACTIVE)
         return -EINVAL;
     spin_lock_irqsave(&q->urb_lock, flags);
     q->active = true;

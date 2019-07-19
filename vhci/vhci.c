@@ -399,10 +399,10 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
         dev = vhci->devices[devid];
         if (!dev || !(dev->tq_mask & BIT(endp)))
             return BCE_VHCI_BAD_ARGUMENT;
-        if (msg->param2 == BCE_VHCI_EDNPOINT_ACTIVE) {
+        if (msg->param2 == BCE_VHCI_ENDPOINT_ACTIVE) {
             bce_vhci_transfer_queue_resume(&dev->tq[endp]);
             return BCE_VHCI_SUCCESS;
-        } else if (msg->param2 == BCE_VHCI_EDNPOINT_PAUSED) {
+        } else if (msg->param2 == BCE_VHCI_ENDPOINT_PAUSED) {
             bce_vhci_transfer_queue_pause(&dev->tq[endp]);
             return BCE_VHCI_SUCCESS;
         }
