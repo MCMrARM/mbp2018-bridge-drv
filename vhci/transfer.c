@@ -4,9 +4,6 @@
 #include "../pci.h"
 #include <linux/usb/hcd.h>
 
-#define BCE_VHCI_MSG_TRANSFER_REQUEST 0x1000
-#define BCE_VHCI_MSG_CONTROL_TRANSFER_STATUS 0x1005
-
 static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq);
 
 static int bce_vhci_urb_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg);
@@ -112,7 +109,7 @@ void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce
     spin_lock_irqsave(&q->urb_lock, flags);
     bce_vhci_transfer_queue_deliver_pending(q);
 
-    if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST &&
+    if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST &&
         (!list_empty(&q->evq) || list_empty(&q->endp->urb_list))) {
         bce_vhci_transfer_queue_defer_event(q, msg);
         goto complete;
@@ -369,7 +366,7 @@ static int bce_vhci_urb_data_transfer_in(struct bce_vhci_urb *urb, unsigned long
     tr_len = urb->urb->transfer_buffer_length - urb->send_offset;
 
     spin_lock(&urb->q->vhci->msg_asynchronous_lock);
-    msg.cmd = BCE_VHCI_MSG_TRANSFER_REQUEST;
+    msg.cmd = BCE_VHCI_CMD_TRANSFER_REQUEST;
     msg.status = 0;
     msg.param1 = ((urb->urb->ep->desc.bEndpointAddress & 0x8Fu) << 8) | urb->q->dev_addr;
     msg.param2 = tr_len;
@@ -419,7 +416,7 @@ static int bce_vhci_urb_data_update(struct bce_vhci_urb *urb, struct bce_vhci_me
     u32 tr_len;
     int status;
     if (urb->state == BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST) {
-        if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST) {
+        if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST) {
             tr_len = min(urb->urb->transfer_buffer_length - urb->send_offset, (u32) msg->param2);
             if ((status = bce_vhci_urb_send_out_data(urb, urb->urb->transfer_dma + urb->send_offset, tr_len)))
                 return status;
@@ -476,13 +473,13 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
 static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg)
 {
     int status;
-    if (msg->cmd == BCE_VHCI_MSG_CONTROL_TRANSFER_STATUS) {
+    if (msg->cmd == BCE_VHCI_CMD_CONTROL_TRANSFER_STATUS) {
         urb->received_status = msg->status;
         return bce_vhci_urb_control_check_status(urb);
     }
 
     if (urb->state == BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST) {
-        if (msg->cmd == BCE_VHCI_MSG_TRANSFER_REQUEST) {
+        if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST) {
             if (bce_vhci_urb_send_out_data(urb, urb->urb->setup_dma, sizeof(struct usb_ctrlrequest))) {
                 pr_err("bce-vhci: [%02x] Failed to start URB setup transfer\n", urb->q->endp_addr);
                 bce_vhci_transfer_queue_request_reset(urb->q);

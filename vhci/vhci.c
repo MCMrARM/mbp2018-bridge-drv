@@ -393,7 +393,7 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
     bce_vhci_device_t devid;
     u8 endp;
     struct bce_vhci_device *dev;
-    if (msg->cmd == 0x43) { /* Request state */
+    if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE) { /* Request state */
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
         endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
         dev = vhci->devices[devid];
@@ -483,7 +483,7 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
     struct bce_vhci_device *dev;
     if (msg->cmd & 0x8000) {
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
-    } else if (msg->cmd == 0x1000 || msg->cmd == 0x1005) {
+    } else if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST || msg->cmd == BCE_VHCI_CMD_CONTROL_TRANSFER_STATUS) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
         endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
         dev = q->vhci->devices[devid];
