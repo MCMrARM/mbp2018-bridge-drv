@@ -33,6 +33,8 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
     if ((status = bce_vhci_create_event_queues(vhci)))
         goto fail_eq;
 
+    vhci->tq_state_wq = alloc_ordered_workqueue("bce-vhci-tq-state", 0);
+
     vhci->hcd = usb_create_hcd(&bce_vhci_driver, vhci->vdev, "bce-vhci");
     if (!vhci->hcd) {
         status = -ENOMEM;
@@ -246,17 +248,9 @@ static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_
 
 static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 {
-    int retval;
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
-    if (!q)
-        return -ENOENT;
     pr_info("bce_vhci_urb_dequeue %x\n", urb->ep->desc.bEndpointAddress);
-    mutex_lock(&q->state_change_mutex);
-    bce_vhci_transfer_queue_pause(q);
-    retval = bce_vhci_urb_cancel(q, urb, status);
-    bce_vhci_transfer_queue_resume(q);
-    mutex_unlock(&q->state_change_mutex);
-    return retval;
+    return bce_vhci_urb_request_cancel(q, urb, status);
 }
 
 static u8 bce_vhci_endpoint_index(u8 addr)
