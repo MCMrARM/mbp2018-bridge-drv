@@ -461,9 +461,13 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
     if (urb->state == BCE_VHCI_URB_DATA_TRANSFER_COMPLETE ||
         (urb->received_status != BCE_VHCI_SUCCESS && urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_REQUEST &&
         urb->state != BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION)) {
-        if (urb->received_status != BCE_VHCI_SUCCESS)
-            pr_err("bce-vhci: [%02x] URB failed: %x\n", urb->q->endp_addr, urb->received_status);
         urb->state = BCE_VHCI_URB_CONTROL_COMPLETE;
+        if (urb->received_status != BCE_VHCI_SUCCESS) {
+            pr_err("bce-vhci: [%02x] URB failed: %x\n", urb->q->endp_addr, urb->received_status);
+            bce_vhci_transfer_queue_request_reset(urb->q);
+            bce_vhci_urb_complete(urb, -EPIPE);
+            return -ENOENT;
+        }
         bce_vhci_urb_complete(urb, 0);
         return -ENOENT;
     }
@@ -482,7 +486,6 @@ static int bce_vhci_urb_control_update(struct bce_vhci_urb *urb, struct bce_vhci
         if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST) {
             if (bce_vhci_urb_send_out_data(urb, urb->urb->setup_dma, sizeof(struct usb_ctrlrequest))) {
                 pr_err("bce-vhci: [%02x] Failed to start URB setup transfer\n", urb->q->endp_addr);
-                bce_vhci_transfer_queue_request_reset(urb->q);
                 return 0; /* TODO: fail the URB? */
             }
             urb->state = BCE_VHCI_URB_CONTROL_WAITING_FOR_SETUP_COMPLETION;
