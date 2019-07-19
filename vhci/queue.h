@@ -2,6 +2,7 @@
 #define BCE_VHCI_QUEUE_H
 
 #include <linux/completion.h>
+#include "../queue.h"
 
 #define VHCI_EVENT_QUEUE_EL_COUNT 256
 #define VHCI_EVENT_PENDING_COUNT 32
@@ -57,9 +58,12 @@ int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message
 void bce_vhci_message_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_message_queue *q);
 void bce_vhci_message_queue_write(struct bce_vhci_message_queue *q, struct bce_vhci_message *req);
 
+int __bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
+        bce_sq_completion compl);
 int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
         bce_vhci_event_queue_callback cb);
 void bce_vhci_event_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_event_queue *q);
+void bce_vhci_event_queue_submit_pending(struct bce_vhci_event_queue *q, size_t count);
 
 void bce_vhci_command_queue_create(struct bce_vhci_command_queue *ret, struct bce_vhci_message_queue *mq);
 void bce_vhci_command_queue_destroy(struct bce_vhci_command_queue *cq);

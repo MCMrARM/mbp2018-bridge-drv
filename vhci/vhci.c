@@ -12,6 +12,8 @@ static int bce_vhci_create_event_queues(struct bce_vhci *vhci);
 static void bce_vhci_destroy_event_queues(struct bce_vhci *vhci);
 static int bce_vhci_create_message_queues(struct bce_vhci *vhci);
 static void bce_vhci_destroy_message_queues(struct bce_vhci *vhci);
+static void bce_vhci_handle_firmware_events_w(struct work_struct *ws);
+static void bce_vhci_firmware_event_completion(struct bce_queue_sq *sq);
 
 int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
 {
@@ -34,6 +36,7 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
         goto fail_eq;
 
     vhci->tq_state_wq = alloc_ordered_workqueue("bce-vhci-tq-state", 0);
+    INIT_WORK(&vhci->w_fw_events, bce_vhci_handle_firmware_events_w);
 
     vhci->hcd = usb_create_hcd(&bce_vhci_driver, vhci->vdev, "bce-vhci");
     if (!vhci->hcd) {
@@ -335,7 +338,6 @@ static void bce_vhci_destroy_message_queues(struct bce_vhci *vhci)
     bce_vhci_message_queue_destroy(vhci, &vhci->msg_asynchronous);
 }
 
-static void bce_vhci_handle_firmware_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg);
 static void bce_vhci_handle_system_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg);
 static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg);
 
@@ -345,7 +347,8 @@ static int bce_vhci_create_event_queues(struct bce_vhci *vhci)
     if (!vhci->ev_cq)
         return -EINVAL;
 #define CREATE_EVENT_QUEUE(field, name, cb) bce_vhci_event_queue_create(vhci, &vhci->field, name, cb)
-    if (CREATE_EVENT_QUEUE(ev_commands,     "VHC1FirmwareCommands",           bce_vhci_handle_firmware_event) ||
+    if (__bce_vhci_event_queue_create(vhci, &vhci->ev_commands, "VHC1FirmwareCommands",
+            bce_vhci_firmware_event_completion) ||
         CREATE_EVENT_QUEUE(ev_system,       "VHC1FirmwareSystemEvents",       bce_vhci_handle_system_event) ||
         CREATE_EVENT_QUEUE(ev_isochronous,  "VHC1FirmwareIsochronousEvents",  bce_vhci_handle_usb_event) ||
         CREATE_EVENT_QUEUE(ev_interrupt,    "VHC1FirmwareInterruptEvents",    bce_vhci_handle_usb_event) ||
@@ -368,10 +371,99 @@ static void bce_vhci_destroy_event_queues(struct bce_vhci *vhci)
         bce_destroy_cq(vhci->dev, vhci->ev_cq);
 }
 
-static void bce_vhci_handle_firmware_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)
+static void bce_vhci_send_fw_event_response(struct bce_vhci *vhci, struct bce_vhci_message *req, u16 status)
 {
+    unsigned long timeout = 1000;
+    struct bce_vhci_message r = *req;
+    r.cmd = (u16) (req->cmd | 0x8000u);
+    r.status = status;
+    r.param1 = req->param1;
+    r.param2 = 0;
+
+    if (bce_reserve_submission(vhci->msg_system.sq, &timeout)) {
+        pr_err("bce-vhci: Cannot reserve submision for FW event reply\n");
+        return;
+    }
+    bce_vhci_message_queue_write(&vhci->msg_system, &r);
+}
+
+
+static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci_message *msg)
+{
+    bce_vhci_device_t devid;
+    u8 endp;
+    struct bce_vhci_device *dev;
+    if (msg->cmd == 0x43) { /* Request state */
+        devid = (bce_vhci_device_t) (msg->param1 & 0xff);
+        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
+        dev = vhci->devices[devid];
+        if (!dev || !(dev->tq_mask & BIT(endp)))
+            return BCE_VHCI_BAD_ARGUMENT;
+        if (msg->param2 == BCE_VHCI_EDNPOINT_ACTIVE) {
+            bce_vhci_transfer_queue_resume(&dev->tq[endp]);
+            return BCE_VHCI_SUCCESS;
+        } else if (msg->param2 == BCE_VHCI_EDNPOINT_PAUSED) {
+            bce_vhci_transfer_queue_pause(&dev->tq[endp]);
+            return BCE_VHCI_SUCCESS;
+        }
+        return BCE_VHCI_BAD_ARGUMENT;
+    }
     pr_warn("bce-vhci: Unhandled firmware event: %x s=%x p1=%x p2=%llx\n",
             msg->cmd, msg->status, msg->param1, msg->param2);
+    return BCE_VHCI_BAD_ARGUMENT;
+}
+
+static void bce_vhci_handle_firmware_events_w(struct work_struct *ws)
+{
+    size_t cnt = 0;
+    int result;
+    struct bce_vhci *vhci = container_of(ws, struct bce_vhci, w_fw_events);
+    struct bce_queue_sq *sq = vhci->ev_commands.sq;
+    struct bce_vhci_message *msg, *msg2 = NULL;
+
+    while (true) {
+        if (msg2) {
+            msg = msg2;
+            msg2 = NULL;
+        } else if (bce_next_completion(sq)) {
+            msg = &vhci->ev_commands.data[sq->head];
+        } else {
+            break;
+        }
+
+        pr_debug("bce-vhci: Got fw event: %x s=%x p1=%x p2=%llx\n", msg->cmd, msg->status, msg->param1, msg->param2);
+        if (bce_next_completion(sq) != NULL) {
+            msg2 = &vhci->ev_commands.data[(sq->head + 1) % sq->el_count];
+            pr_debug("bce-vhci: Got second fw event: %x s=%x p1=%x p2=%llx\n",
+                    msg->cmd, msg->status, msg->param1, msg->param2);
+            if (msg2->cmd == (msg->cmd | 0x4000) && msg2->param1 == msg->param1) {
+                /* Take two elements */
+                pr_debug("bce-vhci: Cancelled\n");
+                bce_vhci_send_fw_event_response(vhci, msg, BCE_VHCI_ABORT);
+
+                bce_notify_submission_complete(sq);
+                bce_notify_submission_complete(sq);
+                cnt += 2;
+                continue;
+            }
+
+            pr_warn("bce-vhci: Handle fw event - unexpected cancellation");
+        }
+
+        result = bce_vhci_handle_firmware_event(vhci, msg);
+        bce_vhci_send_fw_event_response(vhci, msg, (u16) result);
+
+
+        bce_notify_submission_complete(sq);
+        ++cnt;
+    }
+    bce_vhci_event_queue_submit_pending(&vhci->ev_commands, cnt);
+}
+
+static void bce_vhci_firmware_event_completion(struct bce_queue_sq *sq)
+{
+    struct bce_vhci_event_queue *q = sq->userdata;
+    queue_work(q->vhci->tq_state_wq, &q->vhci->w_fw_events);
 }
 
 static void bce_vhci_handle_system_event(struct bce_vhci_event_queue *q, struct bce_vhci_message *msg)

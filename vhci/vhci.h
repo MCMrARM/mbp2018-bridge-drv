@@ -37,6 +37,7 @@ struct bce_vhci {
     bce_vhci_device_t port_to_device[16];
     struct bce_vhci_device *devices[16];
     struct workqueue_struct *tq_state_wq;
+    struct work_struct w_fw_events;
 };
 
 int __init bce_vhci_module_init(void);

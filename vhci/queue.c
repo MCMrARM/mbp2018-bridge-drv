@@ -66,16 +66,13 @@ static void bce_vhci_message_queue_completion(struct bce_queue_sq *sq)
 
 
 static void bce_vhci_event_queue_completion(struct bce_queue_sq *sq);
-static void bce_vhci_submit_pending(struct bce_vhci_event_queue *q, size_t count);
 
-int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
-        bce_vhci_event_queue_callback cb)
+int __bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
+                                  bce_sq_completion compl)
 {
     ret->vhci = vhci;
-    ret->cb = cb;
 
-    ret->sq = bce_create_sq(vhci->dev, vhci->ev_cq, name, VHCI_EVENT_QUEUE_EL_COUNT, DMA_FROM_DEVICE,
-                            bce_vhci_event_queue_completion, ret);
+    ret->sq = bce_create_sq(vhci->dev, vhci->ev_cq, name, VHCI_EVENT_QUEUE_EL_COUNT, DMA_FROM_DEVICE, compl, ret);
     if (!ret->sq)
         return -EINVAL;
     ret->data = dma_alloc_coherent(&vhci->dev->pci->dev, sizeof(struct bce_vhci_message) * VHCI_EVENT_QUEUE_EL_COUNT,
@@ -86,8 +83,15 @@ int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_que
         return -EINVAL;
     }
 
-    bce_vhci_submit_pending(ret, VHCI_EVENT_PENDING_COUNT);
+    bce_vhci_event_queue_submit_pending(ret, VHCI_EVENT_PENDING_COUNT);
     return 0;
+}
+
+int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_queue *ret, const char *name,
+        bce_vhci_event_queue_callback cb)
+{
+    ret->cb = cb;
+    return __bce_vhci_event_queue_create(vhci, ret, name, bce_vhci_event_queue_completion);
 }
 
 void bce_vhci_event_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_event_queue *q)
@@ -113,10 +117,10 @@ static void bce_vhci_event_queue_completion(struct bce_queue_sq *sq)
         bce_notify_submission_complete(sq);
         ++cnt;
     }
-    bce_vhci_submit_pending(ev, cnt);
+    bce_vhci_event_queue_submit_pending(ev, cnt);
 }
 
-static void bce_vhci_submit_pending(struct bce_vhci_event_queue *q, size_t count)
+void bce_vhci_event_queue_submit_pending(struct bce_vhci_event_queue *q, size_t count)
 {
     int idx;
     struct bce_qe_submission *s;

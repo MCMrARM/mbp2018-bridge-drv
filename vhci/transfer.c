@@ -157,7 +157,7 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     bce_vhci_transfer_queue_giveback(q);
 }
 
-static int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
+int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
 {
     unsigned long flags;
     int status;
@@ -183,7 +183,7 @@ static int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
 
 static void bce_vhci_urb_resume(struct bce_vhci_urb *urb);
 
-static int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
+int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
 {
     unsigned long flags;
     int status;
