@@ -213,6 +213,7 @@ static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
     if (q->sq_out)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_out->qid);
     bce_vhci_cmd_endpoint_reset(&q->vhci->cq, q->dev_addr, (u8) (q->endp->desc.bEndpointAddress & 0x8F));
+    q->fw_paused = false;
     spin_lock_irqsave(&q->urb_lock, flags);
     q->stalled = false;
     spin_unlock_irqrestore(&q->urb_lock, flags);
@@ -321,7 +322,8 @@ static void bce_vhci_urb_cancel_w(struct work_struct *ws)
     pr_debug("bce-vhci: [%02x] Cancelling URB\n", w->q->endp_addr);
     bce_vhci_transfer_queue_pause(w->q);
     bce_vhci_urb_remove(w->q, w->urb, w->status);
-    bce_vhci_transfer_queue_resume(w->q);
+    if (!w->q->fw_paused)
+        bce_vhci_transfer_queue_resume(w->q);
     kfree(w);
 }
 

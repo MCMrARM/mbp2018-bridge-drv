@@ -15,6 +15,7 @@ struct bce_vhci_transfer_queue {
     struct usb_host_endpoint *endp;
     enum bce_vhci_endpoint_state state;
     bool active, stalled;
+    bool fw_paused;
     bce_vhci_device_t dev_addr;
     u8 endp_addr;
     struct bce_queue_cq *cq;

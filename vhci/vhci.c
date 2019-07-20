@@ -414,8 +414,10 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
     if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE) {
         if (msg->param2 == BCE_VHCI_ENDPOINT_ACTIVE) {
             bce_vhci_transfer_queue_resume(tq);
+            tq->fw_paused = false;
             return BCE_VHCI_SUCCESS;
         } else if (msg->param2 == BCE_VHCI_ENDPOINT_PAUSED) {
+            tq->fw_paused = true;
             bce_vhci_transfer_queue_pause(tq);
             return BCE_VHCI_SUCCESS;
         }
