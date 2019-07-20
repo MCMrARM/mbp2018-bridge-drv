@@ -207,6 +207,13 @@ static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
 {
     unsigned long flags;
     struct bce_vhci_transfer_queue *q = container_of(work, struct bce_vhci_transfer_queue, w_reset);
+
+    spin_lock_irqsave(&q->urb_lock, flags);
+    if (!q->stalled) {
+        spin_unlock_irqrestore(&q->urb_lock, flags);
+        return;
+    }
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     bce_vhci_transfer_queue_remove_pending(q);
     if (q->sq_in)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_in->qid);
