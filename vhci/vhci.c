@@ -387,7 +387,6 @@ static void bce_vhci_send_fw_event_response(struct bce_vhci *vhci, struct bce_vh
     bce_vhci_message_queue_write(&vhci->msg_system, &r);
 }
 
-
 static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci_message *msg)
 {
     unsigned long flags;
@@ -397,7 +396,7 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
     struct bce_vhci_transfer_queue *tq;
     if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE || msg->cmd == BCE_VHCI_CMD_ENDPOINT_SET_STATE) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
-        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
+        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xff));
         dev = vhci->devices[devid];
         if (!dev || !(dev->tq_mask & BIT(endp)))
             return BCE_VHCI_BAD_ARGUMENT;
@@ -500,7 +499,7 @@ static void bce_vhci_handle_usb_event(struct bce_vhci_event_queue *q, struct bce
         bce_vhci_command_queue_deliver_completion(&q->vhci->cq, msg);
     } else if (msg->cmd == BCE_VHCI_CMD_TRANSFER_REQUEST || msg->cmd == BCE_VHCI_CMD_CONTROL_TRANSFER_STATUS) {
         devid = (bce_vhci_device_t) (msg->param1 & 0xff);
-        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xf));
+        endp = bce_vhci_endpoint_index((u8) ((msg->param1 >> 8) & 0xff));
         dev = q->vhci->devices[devid];
         if (!dev || (dev->tq_mask & BIT(endp)) == 0) {
             pr_err("bce-vhci: Didn't find destination for transfer queue event\n");
