@@ -205,6 +205,7 @@ int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
 
 static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
 {
+    unsigned long flags;
     struct bce_vhci_transfer_queue *q = container_of(work, struct bce_vhci_transfer_queue, w_reset);
     bce_vhci_transfer_queue_remove_pending(q);
     if (q->sq_in)
@@ -212,6 +213,9 @@ static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
     if (q->sq_out)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_out->qid);
     bce_vhci_cmd_endpoint_reset(&q->vhci->cq, q->dev_addr, (u8) (q->endp->desc.bEndpointAddress & 0x8F));
+    spin_lock_irqsave(&q->urb_lock, flags);
+    q->stalled = false;
+    spin_unlock_irqrestore(&q->urb_lock, flags);
     bce_vhci_transfer_queue_resume(q);
 }
 
@@ -247,10 +251,13 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
         return status;
     }
 
-    if (q->active)
+    if (q->active) {
         status = bce_vhci_urb_init(vurb);
-    else
+    } else {
+        if (q->stalled)
+            bce_vhci_transfer_queue_request_reset(q);
         vurb->state = BCE_VHCI_URB_INIT_PAUSED;
+    }
     if (status) {
         usb_hcd_unlink_urb_from_ep(q->vhci->hcd, urb);
         urb->hcpriv = NULL;
@@ -457,6 +464,7 @@ static int bce_vhci_urb_data_transfer_completion(struct bce_vhci_urb *urb, struc
 
 static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
 {
+    struct bce_vhci_transfer_queue *q = urb->q;
     if (urb->received_status == 0)
         return 0;
     if (urb->state == BCE_VHCI_URB_DATA_TRANSFER_COMPLETE ||
@@ -466,8 +474,10 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
         if (urb->received_status != BCE_VHCI_SUCCESS) {
             pr_err("bce-vhci: [%02x] URB failed: %x\n", urb->q->endp_addr, urb->received_status);
             urb->q->active = false;
-            bce_vhci_transfer_queue_request_reset(urb->q);
+            urb->q->stalled = true;
             bce_vhci_urb_complete(urb, -EPIPE);
+            if (!list_empty(&q->endp->urb_list))
+                bce_vhci_transfer_queue_request_reset(urb->q);
             return -ENOENT;
         }
         bce_vhci_urb_complete(urb, 0);

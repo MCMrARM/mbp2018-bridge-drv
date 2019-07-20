@@ -14,7 +14,7 @@ struct bce_vhci_transfer_queue {
     struct bce_vhci *vhci;
     struct usb_host_endpoint *endp;
     enum bce_vhci_endpoint_state state;
-    bool active;
+    bool active, stalled;
     bce_vhci_device_t dev_addr;
     u8 endp_addr;
     struct bce_queue_cq *cq;
@@ -61,6 +61,7 @@ void bce_vhci_destroy_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_tran
 void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce_vhci_message *msg);
 int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q);
 int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q);
+void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q);
 
 int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb);
 int bce_vhci_urb_request_cancel(struct bce_vhci_transfer_queue *q, struct urb *urb, int status);

@@ -256,6 +256,14 @@ static int bce_vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status
     return bce_vhci_urb_request_cancel(q, urb, status);
 }
 
+static void bce_vhci_endpoint_reset(struct usb_hcd *hcd, struct usb_host_endpoint *ep)
+{
+    struct bce_vhci_transfer_queue *q = ep->hcpriv;
+    pr_info("bce_vhci_endpoint_reset\n");
+    if (q)
+        bce_vhci_transfer_queue_request_reset(q);
+}
+
 static u8 bce_vhci_endpoint_index(u8 addr)
 {
     if (addr & 0x80)
@@ -417,6 +425,7 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
             tq->state = msg->param2;
             spin_lock_irqsave(&tq->urb_lock, flags);
             tq->active = false;
+            tq->stalled = true;
             spin_unlock_irqrestore(&tq->urb_lock, flags);
             return BCE_VHCI_SUCCESS;
         }
@@ -530,6 +539,7 @@ static const struct hc_driver bce_vhci_driver = {
         .address_device = bce_vhci_address_device,
         .add_endpoint = bce_vhci_add_endpoint,
         .drop_endpoint = bce_vhci_drop_endpoint,
+        .endpoint_reset = bce_vhci_endpoint_reset,
         .check_bandwidth = bce_vhci_check_bandwidth,
         .get_frame_number = bce_vhci_get_frame_number
 };
