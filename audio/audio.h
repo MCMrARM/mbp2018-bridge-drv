@@ -47,7 +47,11 @@ struct aaudio_device {
 
     struct bce_device *bce;
     struct aaudio_bce bcem;
+
+    struct completion remote_alive;
 };
+
+void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg);
 
 int aaudio_module_init(void);
 void aaudio_module_exit(void);

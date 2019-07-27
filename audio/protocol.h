@@ -10,11 +10,16 @@ struct aaudio_msg {
     size_t size;
 };
 
-struct aaudio_msg_header {
+struct __attribute__((packed)) aaudio_msg_header {
     char tag[4];
     u8 type;
     aaudio_device_id_t device_id; // Idk, use zero for commands?
 };
+struct __attribute__((packed)) aaudio_msg_base {
+    u32 msg;
+    u32 status;
+};
+
 enum {
     AAUDIO_MSG_TYPE_COMMAND = 1,
     AAUDIO_MSG_TYPE_RESPONSE = 2,
@@ -25,9 +30,12 @@ enum {
     AAUDIO_MSG_START_IO = 0,
     AAUDIO_MSG_SET_REMOTE_ACCESS = 2,
 
-    AAUDIO_MSG_NOTIFICATION_ALIVE = 100
+    AAUDIO_MSG_NOTIFICATION_ALIVE = 100,
+    AAUDIO_MSG_NOTIFICATION_BOOT = 104
 };
 
+
+int aaudio_msg_get_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
 
 void aaudio_msg_set_alive_notification(struct aaudio_msg *msg, u32 proto_ver, u32 msg_ver);
 

@@ -46,6 +46,8 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail;
     }
 
+    init_completion(&aaudio->remote_alive);
+
     dev_info(aaudio->dev, "aaudio: bs len = %llx\n", pci_resource_len(dev, 0));
     aaudio->reg_mem_bs = pci_iomap(dev, 0, 0);
     aaudio->reg_mem_cfg = pci_iomap(dev, 4, 0);
@@ -84,8 +86,22 @@ fail:
     return status;
 }
 
+static void aaudio_remove(struct pci_dev *dev)
+{
+    struct aaudio_device *aaudio = pci_get_drvdata(dev);
+
+    pci_iounmap(dev, aaudio->reg_mem_bs);
+    pci_iounmap(dev, aaudio->reg_mem_cfg);
+    device_destroy(aaudio_class, aaudio->devt);
+    pci_free_irq_vectors(dev);
+    pci_release_regions(dev);
+    pci_disable_device(dev);
+    kfree(aaudio);
+}
+
 static int aaudio_init(struct aaudio_device *a)
 {
+    int status;
     int i, j;
     u32 ver, sig, bs_base;
     struct aaudio_msg msg;
@@ -120,25 +136,55 @@ static int aaudio_init(struct aaudio_device *a)
         }
     }
 
-    if (aaudio_send_prepare(&a->bcem.qout, &msg, NULL))
-        pr_err("aaudio_send_start failed\n");
+    if ((status = aaudio_send_prepare(&a->bcem.qout, &msg, NULL))) {
+        pr_err("aaudio_send_prepare failed\n");
+        return status;
+    }
     aaudio_msg_set_alive_notification(&msg, 1, 3);
+    aaudio_send(&a->bcem.qout, &msg);
+
+    if (wait_for_completion_timeout(&a->remote_alive, msecs_to_jiffies(500)) == 0) {
+        pr_err("Timed out waiting for remote\n");
+        return -ETIMEDOUT;
+    }
+    dev_info(a->dev, "aaudio: Continuing init\n");
+
+    if ((status = aaudio_send_prepare(&a->bcem.qout, &msg, NULL))) {
+        pr_err("aaudio_send_prepare failed\n");
+        return status;
+    }
+    aaudio_msg_set_remote_access(&msg, AAUDIO_REMOTE_ACCESS_ON);
     aaudio_send(&a->bcem.qout, &msg);
 
     return 0;
 }
 
-static void aaudio_remove(struct pci_dev *dev)
+void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
 {
-    struct aaudio_device *aaudio = pci_get_drvdata(dev);
+    struct aaudio_msg rmsg;
+    struct aaudio_msg_base base;
+    if (aaudio_msg_get_base(msg, &base))
+        return;
+    switch (base.msg) {
+        case AAUDIO_MSG_NOTIFICATION_BOOT:
+            dev_info(a->dev, "Received boot notification from remote\n");
 
-    pci_iounmap(dev, aaudio->reg_mem_bs);
-    pci_iounmap(dev, aaudio->reg_mem_cfg);
-    device_destroy(aaudio_class, aaudio->devt);
-    pci_free_irq_vectors(dev);
-    pci_release_regions(dev);
-    pci_disable_device(dev);
-    kfree(aaudio);
+            /* Resend the alive notify */
+            if (!(aaudio_send_prepare(&a->bcem.qout, &rmsg, NULL))) {
+                aaudio_msg_set_alive_notification(&rmsg, 1, 3);
+                aaudio_send(&a->bcem.qout, &rmsg);
+            } else {
+                pr_err("aaudio_send_prepare failed\n");
+            }
+            break;
+        case AAUDIO_MSG_NOTIFICATION_ALIVE:
+            dev_info(a->dev, "Received alive notification from remote\n");
+            complete_all(&a->remote_alive);
+            break;
+        default:
+            dev_info(a->dev, "Unhandled notification %i", base.msg);
+            break;
+    }
 }
 
 static struct pci_device_id aaudio_ids[  ] = {

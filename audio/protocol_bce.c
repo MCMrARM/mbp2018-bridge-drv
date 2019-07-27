@@ -30,7 +30,6 @@ int aaudio_bce_init(struct aaudio_device *dev)
 int aaudio_bce_queue_init(struct aaudio_device *dev, struct aaudio_bce_queue *q, const char *name, int direction,
         bce_sq_completion cfn)
 {
-    int status;
     q->cq = dev->bcem.cq;
     q->el_size = AAUDIO_BCE_QUEUE_ELEMENT_SIZE;
     q->el_count = AAUDIO_BCE_QUEUE_ELEMENT_COUNT;
@@ -51,8 +50,8 @@ int aaudio_bce_queue_init(struct aaudio_device *dev, struct aaudio_bce_queue *q,
 static void aaudio_send_create_tag(struct aaudio_bce_queue *q, char tag[4])
 {
     char tag_zero[5];
-    snprintf(tag_zero, 5, "S%03d", q->next_el_index);
     ++q->next_el_index;
+    snprintf(tag_zero, 5, "S%03d", q->next_el_index);
     memcpy(tag, tag_zero, 4);
 }
 
@@ -94,21 +93,23 @@ static void aaudio_bce_out_queue_completion(struct bce_queue_sq *sq)
     }
 }
 
+static void aaudio_bce_in_queue_handle_msg(struct aaudio_device *a, struct aaudio_msg *msg);
+
 static void aaudio_bce_in_queue_completion(struct bce_queue_sq *sq)
 {
+    struct aaudio_msg msg;
     struct aaudio_device *dev = sq->userdata;
     struct aaudio_bce_queue *q = &dev->bcem.qin;
     struct bce_sq_completion_data *c;
-    void *ptr;
     size_t cnt = 0;
 
     mb();
     while ((c = bce_next_completion(sq))) {
-        ptr = (u8 *) q->data + q->data_head * q->el_size;
+        msg.data = (u8 *) q->data + q->data_head * q->el_size;
+        msg.size = c->data_size;
         pr_info("aaudio: Received command data %llx\n", c->data_size);
-        if (c->data_size > 256)
-            c->data_size = 256;
-        print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, ptr, c->data_size, true);
+        print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, msg.size, true);
+        aaudio_bce_in_queue_handle_msg(dev, &msg);
 
         q->data_head = (q->data_head + 1) % q->el_size;
 
@@ -116,6 +117,18 @@ static void aaudio_bce_in_queue_completion(struct bce_queue_sq *sq)
         ++cnt;
     }
     aaudio_bce_in_queue_submit_pending(q, cnt);
+}
+
+static void aaudio_bce_in_queue_handle_msg(struct aaudio_device *a, struct aaudio_msg *msg)
+{
+    struct aaudio_msg_header *header = (struct aaudio_msg_header *) msg->data;
+    if (msg->size < sizeof(struct aaudio_msg_header)) {
+        pr_err("aaudio: Msg size smaller than header (%lx)", msg->size);
+        return;
+    }
+    if (header->type == AAUDIO_MSG_TYPE_NOTIFICATION) {
+        aaudio_handle_notification(a, msg);
+    }
 }
 
 void aaudio_bce_in_queue_submit_pending(struct aaudio_bce_queue *q, size_t count)
