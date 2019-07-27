@@ -30,3 +30,4 @@ struct bce_device {
     struct bce_vhci vhci;
 };
 
+extern struct bce_device *global_bce;

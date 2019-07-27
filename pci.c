@@ -1,8 +1,11 @@
 #include "pci.h"
 #include <linux/module.h>
+#include "audio/audio.h"
 
 static dev_t bce_chrdev;
 static struct class *bce_class;
+
+struct bce_device *global_bce;
 
 static int bce_create_command_queues(struct bce_device *bce);
 static void bce_free_command_queues(struct bce_device *bce);
@@ -81,6 +84,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_ts;
     }
 
+    global_bce = bce;
 
     bce_vhci_create(bce, &bce->vhci);
 
@@ -259,6 +263,9 @@ static int __init bce_module_init(void)
     result = pci_register_driver(&bce_pci_driver);
     if (result)
         goto fail_drv;
+
+    aaudio_module_init();
+
     return 0;
 
 fail_drv:
@@ -273,10 +280,11 @@ fail_chrdev:
 }
 static void __exit bce_module_exit(void)
 {
+    aaudio_module_exit();
     bce_vhci_module_exit();
+    pci_unregister_driver(&bce_pci_driver);
     class_destroy(bce_class);
     unregister_chrdev_region(bce_chrdev, 1);
-    pci_unregister_driver(&bce_pci_driver);
 }
 
 MODULE_LICENSE("GPL");
