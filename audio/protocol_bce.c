@@ -165,7 +165,7 @@ static void aaudio_bce_in_queue_completion(struct bce_queue_sq *sq)
         msg.data = (u8 *) q->data + q->data_head * q->el_size;
         msg.size = c->data_size;
         pr_info("aaudio: Received command data %llx\n", c->data_size);
-        print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, msg.size, true);
+        print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, min(msg.size, 128UL), true);
         aaudio_bce_in_queue_handle_msg(dev, &msg);
 
         q->data_head = (q->data_head + 1) % q->el_size;
