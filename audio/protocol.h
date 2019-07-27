@@ -28,7 +28,8 @@ enum {
 
 enum {
     AAUDIO_MSG_START_IO = 0,
-    AAUDIO_MSG_SET_REMOTE_ACCESS = 2,
+    AAUDIO_MSG_SET_REMOTE_ACCESS = 32,
+    AAUDIO_MSG_SET_REMOTE_ACCESS_RESPONSE = 33,
 
     AAUDIO_MSG_NOTIFICATION_ALIVE = 100,
     AAUDIO_MSG_NOTIFICATION_BOOT = 104
@@ -36,6 +37,8 @@ enum {
 
 
 int aaudio_msg_get_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
+
+int aaudio_msg_get_remote_access_response(struct aaudio_msg *msg);
 
 void aaudio_msg_set_alive_notification(struct aaudio_msg *msg, u32 proto_ver, u32 msg_ver);
 

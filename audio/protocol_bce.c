@@ -13,6 +13,7 @@ int aaudio_bce_init(struct aaudio_device *dev)
     int status;
     struct aaudio_bce *bce = &dev->bcem;
     bce->cq = bce_create_cq(dev->bce, 0x80);
+    spin_lock_init(&bce->spinlock);
     if (!bce->cq)
         return -EINVAL;
     if ((status = aaudio_bce_queue_init(dev, &bce->qout, "com.apple.BridgeAudio.IntelToARM", DMA_TO_DEVICE,
@@ -37,7 +38,6 @@ int aaudio_bce_queue_init(struct aaudio_device *dev, struct aaudio_bce_queue *q,
     q->sq = bce_create_sq(dev->bce, q->cq, name, (u32) (q->el_count + 1), direction, cfn, dev);
     if (!q->sq)
         return -EINVAL;
-    spin_lock_init(&q->spinlock);
 
     q->data = dma_alloc_coherent(&dev->bce->pci->dev, q->el_size * q->el_count, &q->dma_addr, GFP_KERNEL);
     if (!q->data) {
@@ -47,42 +47,99 @@ int aaudio_bce_queue_init(struct aaudio_device *dev, struct aaudio_bce_queue *q,
     return 0;
 }
 
-static void aaudio_send_create_tag(struct aaudio_bce_queue *q, char tag[4])
+static void aaudio_send_create_tag(struct aaudio_bce *b, int *tagn, char tag[4])
 {
     char tag_zero[5];
-    ++q->next_el_index;
-    snprintf(tag_zero, 5, "S%03d", q->next_el_index);
-    memcpy(tag, tag_zero, 4);
+    b->tag_num = (b->tag_num + 1) % AAUDIO_BCE_QUEUE_TAG_COUNT;
+    *tagn = b->tag_num;
+    snprintf(tag_zero, 5, "S%03d", b->tag_num);
+    *((u32 *) tag) = *((u32 *) tag_zero);
 }
 
-int aaudio_send_prepare(struct aaudio_bce_queue *q, struct aaudio_msg *msg, unsigned long *timeout)
+int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
 {
     int status;
     size_t index;
     void *dptr;
     struct aaudio_msg_header *header;
-    if ((status = bce_reserve_submission(q->sq, timeout)))
+    if ((status = bce_reserve_submission(b->qout.sq, &ctx->timeout)))
         return status;
-    spin_lock(&q->spinlock);
-    index = q->data_tail;
-    dptr = (u8 *) q->data + index * q->el_size;
-    msg->data = dptr;
+    spin_lock_irqsave(&b->spinlock, ctx->irq_flags);
+    index = b->qout.data_tail;
+    dptr = (u8 *) b->qout.data + index * b->qout.el_size;
+    ctx->msg.data = dptr;
     header = dptr;
-    aaudio_send_create_tag(q, header->tag);
+    aaudio_send_create_tag(b, &ctx->tag_n, header->tag);
     header->type = AAUDIO_MSG_TYPE_NOTIFICATION;
     header->device_id = 0;
     return 0;
 }
 
-void aaudio_send(struct aaudio_bce_queue *q, struct aaudio_msg *msg)
+void __aaudio_send(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
 {
-    struct bce_qe_submission *s = bce_next_submission(q->sq);
+    struct bce_qe_submission *s = bce_next_submission(b->qout.sq);
     pr_info("aaudio: Sending command data\n");
-    print_hex_dump(KERN_INFO, "aaudio:OUT ", DUMP_PREFIX_NONE, 32, 1, msg->data, msg->size, true);
-    bce_set_submission_single(s, q->dma_addr + (dma_addr_t) (msg->data - q->data), msg->size);
-    bce_submit_to_device(q->sq);
-    q->data_tail = (q->data_tail + 1) % q->el_size;
-    spin_unlock(&q->spinlock);
+    print_hex_dump(KERN_INFO, "aaudio:OUT ", DUMP_PREFIX_NONE, 32, 1, ctx->msg.data, ctx->msg.size, true);
+    bce_set_submission_single(s, b->qout.dma_addr + (dma_addr_t) (ctx->msg.data - b->qout.data), ctx->msg.size);
+    bce_submit_to_device(b->qout.sq);
+    b->qout.data_tail = (b->qout.data_tail + 1) % b->qout.el_size;
+    spin_unlock_irqrestore(&b->spinlock, ctx->irq_flags);
+}
+
+int __aaudio_send_cmd_sync(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, struct aaudio_msg *reply)
+{
+    struct aaudio_bce_queue_entry ent;
+    DECLARE_COMPLETION_ONSTACK(cmpl);
+    ent.msg = reply;
+    ent.cmpl = &cmpl;
+    b->pending_entries[ctx->tag_n] = &ent;
+    __aaudio_send(b, ctx); /* unlocks the spinlock */
+    ctx->timeout = wait_for_completion_timeout(&cmpl, ctx->timeout);
+    if (ctx->timeout == 0) {
+        /* Remove the pending queue entry; this will be normally handled by the completion route but
+         * during a timeout it won't */
+        spin_lock_irqsave(&b->spinlock, ctx->irq_flags);
+        if (b->pending_entries[ctx->tag_n] == &ent)
+            b->pending_entries[ctx->tag_n] = NULL;
+        spin_unlock_irqrestore(&b->spinlock, ctx->irq_flags);
+        return -ETIMEDOUT;
+    }
+    return 0;
+}
+
+static void aaudio_handle_reply(struct aaudio_bce *b, struct aaudio_msg *reply)
+{
+    const char *tag;
+    int tagn;
+    unsigned long irq_flags;
+    char tag_zero[5];
+    struct aaudio_bce_queue_entry *entry;
+
+    tag = ((struct aaudio_msg_header *) reply->data)->tag;
+    if (tag[0] != 'S') {
+        pr_err("aaudio_handle_reply: Unexpected tag: %.4s\n", tag);
+        return;
+    }
+    *((u32 *) tag_zero) = *((u32 *) tag);
+    tag_zero[4] = 0;
+    if (kstrtoint(&tag_zero[1], 10, &tagn)) {
+        pr_err("aaudio_handle_reply: Tag parse failed: %.4s\n", tag);
+        return;
+    }
+
+    spin_lock_irqsave(&b->spinlock, irq_flags);
+    entry = b->pending_entries[tagn];
+    if (entry) {
+        if (reply->size < entry->msg->size)
+            entry->msg->size = reply->size;
+        memcpy(entry->msg->data, reply->data, entry->msg->size);
+        complete(entry->cmpl);
+
+        b->pending_entries[tagn] = NULL;
+    } else {
+        pr_err("aaudio_handle_reply: No queued item found for tag: %.4s\n", tag);
+    }
+    spin_unlock_irqrestore(&b->spinlock, irq_flags);
 }
 
 static void aaudio_bce_out_queue_completion(struct bce_queue_sq *sq)
@@ -128,6 +185,8 @@ static void aaudio_bce_in_queue_handle_msg(struct aaudio_device *a, struct aaudi
     }
     if (header->type == AAUDIO_MSG_TYPE_NOTIFICATION) {
         aaudio_handle_notification(a, msg);
+    } else if (header->type == AAUDIO_MSG_TYPE_RESPONSE) {
+        aaudio_handle_reply(&a->bcem, msg);
     }
 }
 
@@ -144,4 +203,15 @@ void aaudio_bce_in_queue_submit_pending(struct aaudio_bce_queue *q, size_t count
         q->data_tail = (q->data_tail + 1) % q->el_size;
     }
     bce_submit_to_device(q->sq);
+}
+
+void aaudio_reply_alloc(struct aaudio_msg *reply)
+{
+    reply->size = AAUDIO_BCE_QUEUE_ELEMENT_SIZE;
+    reply->data = kmalloc(reply->size, GFP_KERNEL);
+}
+
+void aaudio_reply_free(struct aaudio_msg *reply)
+{
+    kfree(reply->data);
 }

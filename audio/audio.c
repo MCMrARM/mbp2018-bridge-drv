@@ -99,12 +99,14 @@ static void aaudio_remove(struct pci_dev *dev)
     kfree(aaudio);
 }
 
+static int aaudio_set_remote_access(struct aaudio_device *a, u64 mode);
+
 static int aaudio_init(struct aaudio_device *a)
 {
     int status;
     int i, j;
     u32 ver, sig, bs_base;
-    struct aaudio_msg msg;
+    struct aaudio_send_ctx sctx;
 
     ver = ioread32(&a->reg_mem_gpr[0]);
     if (ver < 3) {
@@ -136,12 +138,11 @@ static int aaudio_init(struct aaudio_device *a)
         }
     }
 
-    if ((status = aaudio_send_prepare(&a->bcem.qout, &msg, NULL))) {
-        pr_err("aaudio_send_prepare failed\n");
+    if ((status = aaudio_send(a, &sctx, 500,
+            aaudio_msg_set_alive_notification, 1, 3))) {
+        pr_err("Sending alive notification failed\n");
         return status;
     }
-    aaudio_msg_set_alive_notification(&msg, 1, 3);
-    aaudio_send(&a->bcem.qout, &msg);
 
     if (wait_for_completion_timeout(&a->remote_alive, msecs_to_jiffies(500)) == 0) {
         pr_err("Timed out waiting for remote\n");
@@ -149,19 +150,33 @@ static int aaudio_init(struct aaudio_device *a)
     }
     dev_info(a->dev, "aaudio: Continuing init\n");
 
-    if ((status = aaudio_send_prepare(&a->bcem.qout, &msg, NULL))) {
-        pr_err("aaudio_send_prepare failed\n");
+    if ((status = aaudio_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
+        pr_err("Failed to set remote access\n");
         return status;
     }
-    aaudio_msg_set_remote_access(&msg, AAUDIO_REMOTE_ACCESS_ON);
-    aaudio_send(&a->bcem.qout, &msg);
+
 
     return 0;
 }
 
+static int aaudio_set_remote_access(struct aaudio_device *a, u64 mode)
+{
+    int status = 0;
+    struct aaudio_send_ctx sctx;
+    struct aaudio_msg reply;
+    aaudio_reply_alloc(&reply);
+    if ((status = aaudio_send_cmd_sync(a, &sctx, &reply, 500,
+            aaudio_msg_set_remote_access, mode)))
+        goto finish;
+    status = aaudio_msg_get_remote_access_response(&reply);
+finish:
+    aaudio_reply_free(&reply);
+    return status;
+}
+
 void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
 {
-    struct aaudio_msg rmsg;
+    struct aaudio_send_ctx sctx;
     struct aaudio_msg_base base;
     if (aaudio_msg_get_base(msg, &base))
         return;
@@ -170,11 +185,8 @@ void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
             dev_info(a->dev, "Received boot notification from remote\n");
 
             /* Resend the alive notify */
-            if (!(aaudio_send_prepare(&a->bcem.qout, &rmsg, NULL))) {
-                aaudio_msg_set_alive_notification(&rmsg, 1, 3);
-                aaudio_send(&a->bcem.qout, &rmsg);
-            } else {
-                pr_err("aaudio_send_prepare failed\n");
+            if (aaudio_send(a, &sctx, 500, aaudio_msg_set_alive_notification, 1, 3)) {
+                pr_err("Sending alive notification failed\n");
             }
             break;
         case AAUDIO_MSG_NOTIFICATION_ALIVE:

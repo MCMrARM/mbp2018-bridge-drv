@@ -10,6 +10,17 @@ int aaudio_msg_get_base(struct aaudio_msg *msg, struct aaudio_msg_base *base)
     return 0;
 }
 
+#define READ_START(type) { \
+    if (((struct aaudio_msg_base *) ((struct aaudio_msg_header *) msg->data + 1))->msg != type) \
+        return -EINVAL; \
+    }
+
+int aaudio_msg_get_remote_access_response(struct aaudio_msg *msg)
+{
+    READ_START(AAUDIO_MSG_SET_REMOTE_ACCESS_RESPONSE);
+    return 0;
+}
+
 #define WRITE_START_COMMAND(devid) \
     size_t offset = sizeof(struct aaudio_msg_header); \
     ((struct aaudio_msg_header *) msg->data)->type = AAUDIO_MSG_TYPE_COMMAND; \
