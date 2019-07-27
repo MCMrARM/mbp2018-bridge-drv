@@ -65,7 +65,7 @@ int __aaudio_send_cmd_sync(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, st
     (ctx)->status; \
 })
 
-void aaudio_reply_alloc(struct aaudio_msg *reply);
+struct aaudio_msg aaudio_reply_alloc(void);
 void aaudio_reply_free(struct aaudio_msg *reply);
 
 #endif //AAUDIO_PROTOCOL_BCE_H

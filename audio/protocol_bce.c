@@ -205,10 +205,12 @@ void aaudio_bce_in_queue_submit_pending(struct aaudio_bce_queue *q, size_t count
     bce_submit_to_device(q->sq);
 }
 
-void aaudio_reply_alloc(struct aaudio_msg *reply)
+struct aaudio_msg aaudio_reply_alloc(void)
 {
-    reply->size = AAUDIO_BCE_QUEUE_ELEMENT_SIZE;
-    reply->data = kmalloc(reply->size, GFP_KERNEL);
+    struct aaudio_msg ret;
+    ret.size = AAUDIO_BCE_QUEUE_ELEMENT_SIZE;
+    ret.data = kmalloc(ret.size, GFP_KERNEL);
+    return ret;
 }
 
 void aaudio_reply_free(struct aaudio_msg *reply)

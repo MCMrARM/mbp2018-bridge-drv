@@ -99,8 +99,6 @@ static void aaudio_remove(struct pci_dev *dev)
     kfree(aaudio);
 }
 
-static int aaudio_set_remote_access(struct aaudio_device *a, u64 mode);
-
 static int aaudio_init(struct aaudio_device *a)
 {
     int status;
@@ -139,7 +137,7 @@ static int aaudio_init(struct aaudio_device *a)
     }
 
     if ((status = aaudio_send(a, &sctx, 500,
-            aaudio_msg_set_alive_notification, 1, 3))) {
+            aaudio_msg_write_alive_notification, 1, 3))) {
         pr_err("Sending alive notification failed\n");
         return status;
     }
@@ -150,42 +148,29 @@ static int aaudio_init(struct aaudio_device *a)
     }
     dev_info(a->dev, "aaudio: Continuing init\n");
 
-    if ((status = aaudio_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
+    if ((status = aaudio_cmd_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
         pr_err("Failed to set remote access\n");
         return status;
     }
 
+    aaudio_cmd_start_io(a, 0x3a);
 
     return 0;
-}
-
-static int aaudio_set_remote_access(struct aaudio_device *a, u64 mode)
-{
-    int status = 0;
-    struct aaudio_send_ctx sctx;
-    struct aaudio_msg reply;
-    aaudio_reply_alloc(&reply);
-    if ((status = aaudio_send_cmd_sync(a, &sctx, &reply, 500,
-            aaudio_msg_set_remote_access, mode)))
-        goto finish;
-    status = aaudio_msg_get_remote_access_response(&reply);
-finish:
-    aaudio_reply_free(&reply);
-    return status;
 }
 
 void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
 {
     struct aaudio_send_ctx sctx;
     struct aaudio_msg_base base;
-    if (aaudio_msg_get_base(msg, &base))
+    if (aaudio_msg_read_base(msg, &base))
         return;
     switch (base.msg) {
         case AAUDIO_MSG_NOTIFICATION_BOOT:
             dev_info(a->dev, "Received boot notification from remote\n");
 
             /* Resend the alive notify */
-            if (aaudio_send(a, &sctx, 500, aaudio_msg_set_alive_notification, 1, 3)) {
+            if (aaudio_send(a, &sctx, 500,
+                    aaudio_msg_write_alive_notification, 1, 3)) {
                 pr_err("Sending alive notification failed\n");
             }
             break;

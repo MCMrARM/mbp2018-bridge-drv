@@ -3,6 +3,8 @@
 
 #include <linux/types.h>
 
+struct aaudio_device;
+
 typedef u64 aaudio_device_id_t;
 
 struct aaudio_msg {
@@ -28,6 +30,7 @@ enum {
 
 enum {
     AAUDIO_MSG_START_IO = 0,
+    AAUDIO_MSG_START_IO_RESPONSE = 1,
     AAUDIO_MSG_SET_REMOTE_ACCESS = 32,
     AAUDIO_MSG_SET_REMOTE_ACCESS_RESPONSE = 33,
 
@@ -36,18 +39,24 @@ enum {
 };
 
 
-int aaudio_msg_get_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
+int aaudio_msg_read_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
 
-int aaudio_msg_get_remote_access_response(struct aaudio_msg *msg);
+int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg);
 
-void aaudio_msg_set_alive_notification(struct aaudio_msg *msg, u32 proto_ver, u32 msg_ver);
+int aaudio_msg_read_start_io_response(struct aaudio_msg *msg);
+
+void aaudio_msg_write_alive_notification(struct aaudio_msg *msg, u32 proto_ver, u32 msg_ver);
 
 enum {
     AAUDIO_REMOTE_ACCESS_OFF = 0,
     AAUDIO_REMOTE_ACCESS_ON = 2
 };
-void aaudio_msg_set_remote_access(struct aaudio_msg *msg, u64 mode);
+void aaudio_msg_write_set_remote_access(struct aaudio_msg *msg, u64 mode);
 
-void aaudio_msg_start_io(struct aaudio_msg *msg, aaudio_device_id_t dev);
+
+int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode);
+int aaudio_cmd_start_io(struct aaudio_device *a, aaudio_device_id_t devid);
+
+
 
 #endif //AAUDIO_PROTOCOL_H
