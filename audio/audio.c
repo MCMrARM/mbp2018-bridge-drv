@@ -184,6 +184,36 @@ void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
     }
 }
 
+#define aaudio_send_cmd_response(a, sctx, msg, fn, ...) \
+    if (aaudio_send_with_tag(a, sctx, ((struct aaudio_msg_header *) msg->data)->tag, 500, fn, ##__VA_ARGS__)) \
+        pr_err("aaudio: Failed to reply to a command\n");
+
+void aaudio_handle_cmd_timestamp(struct aaudio_device *a, struct aaudio_msg *msg)
+{
+    struct aaudio_send_ctx sctx;
+    u64 devid, timestamp, update_seed;
+    aaudio_msg_read_update_timestamp(msg, &devid, &timestamp, &update_seed);
+    dev_info(a->dev, "Received timestamp update for dev=%llx ts=%llx seed=%llx\n", devid, timestamp, update_seed);
+
+    aaudio_send_cmd_response(a, &sctx, msg,
+            aaudio_msg_write_update_timestamp_response);
+}
+
+void aaudio_handle_command(struct aaudio_device *a, struct aaudio_msg *msg)
+{
+    struct aaudio_msg_base base;
+    if (aaudio_msg_read_base(msg, &base))
+        return;
+    switch (base.msg) {
+        case AAUDIO_MSG_UPDATE_TIMESTAMP:
+            aaudio_handle_cmd_timestamp(a, msg);
+            break;
+        default:
+            dev_info(a->dev, "Unhandled device command %i", base.msg);
+            break;
+    }
+}
+
 static struct pci_device_id aaudio_ids[  ] = {
         { PCI_DEVICE(PCI_VENDOR_ID_APPLE, 0x1803) },
         { 0, },

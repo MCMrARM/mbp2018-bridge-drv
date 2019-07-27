@@ -56,7 +56,7 @@ static void aaudio_send_create_tag(struct aaudio_bce *b, int *tagn, char tag[4])
     *((u32 *) tag) = *((u32 *) tag_zero);
 }
 
-int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
+int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, char *tag)
 {
     int status;
     size_t index;
@@ -69,7 +69,10 @@ int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
     dptr = (u8 *) b->qout.data + index * b->qout.el_size;
     ctx->msg.data = dptr;
     header = dptr;
-    aaudio_send_create_tag(b, &ctx->tag_n, header->tag);
+    if (tag)
+        *((u32 *) header->tag) = *((u32 *) tag);
+    else
+        aaudio_send_create_tag(b, &ctx->tag_n, header->tag);
     header->type = AAUDIO_MSG_TYPE_NOTIFICATION;
     header->device_id = 0;
     return 0;
@@ -183,10 +186,12 @@ static void aaudio_bce_in_queue_handle_msg(struct aaudio_device *a, struct aaudi
         pr_err("aaudio: Msg size smaller than header (%lx)", msg->size);
         return;
     }
-    if (header->type == AAUDIO_MSG_TYPE_NOTIFICATION) {
-        aaudio_handle_notification(a, msg);
-    } else if (header->type == AAUDIO_MSG_TYPE_RESPONSE) {
+    if (header->type == AAUDIO_MSG_TYPE_RESPONSE) {
         aaudio_handle_reply(&a->bcem, msg);
+    } else if (header->type == AAUDIO_MSG_TYPE_COMMAND) {
+        aaudio_handle_command(a, msg);
+    } else if (header->type == AAUDIO_MSG_TYPE_NOTIFICATION) {
+        aaudio_handle_notification(a, msg);
     }
 }
 

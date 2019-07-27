@@ -41,23 +41,24 @@ struct aaudio_send_ctx {
 };
 
 int aaudio_bce_init(struct aaudio_device *dev);
-int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx);
+int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, char *tag);
 void __aaudio_send(struct aaudio_bce *b, struct aaudio_send_ctx *ctx);
 int __aaudio_send_cmd_sync(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, struct aaudio_msg *reply);
 
-#define aaudio_send(a, ctx, tout, fn, ...) ({ \
+#define aaudio_send_with_tag(a, ctx, tag, tout, fn, ...) ({ \
     (ctx)->timeout = msecs_to_jiffies(tout); \
-    (ctx)->status = __aaudio_send_prepare(&(a)->bcem, (ctx)); \
+    (ctx)->status = __aaudio_send_prepare(&(a)->bcem, (ctx), (tag)); \
     if (!(ctx)->status) { \
-        fn(&(ctx)->msg, __VA_ARGS__); \
+        fn(&(ctx)->msg, ##__VA_ARGS__); \
         __aaudio_send(&(a)->bcem, (ctx)); \
     } \
     (ctx)->status; \
 })
+#define aaudio_send(a, ctx, tout, fn, ...) aaudio_send_with_tag(a, ctx, NULL, tout, fn, ##__VA_ARGS__)
 
 #define aaudio_send_cmd_sync(a, ctx, reply, tout, fn, ...) ({ \
     (ctx)->timeout = msecs_to_jiffies(tout); \
-    (ctx)->status = __aaudio_send_prepare(&(a)->bcem, (ctx)); \
+    (ctx)->status = __aaudio_send_prepare(&(a)->bcem, (ctx), NULL); \
     if (!(ctx)->status) { \
         fn(&(ctx)->msg, __VA_ARGS__); \
         (ctx)->status = __aaudio_send_cmd_sync(&(a)->bcem, (ctx), (reply)); \
