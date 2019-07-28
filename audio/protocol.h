@@ -6,6 +6,7 @@
 struct aaudio_device;
 
 typedef u64 aaudio_device_id_t;
+typedef u64 aaudio_object_id_t;
 
 struct aaudio_msg {
     void *data;
@@ -22,6 +23,13 @@ struct __attribute__((packed)) aaudio_msg_base {
     u32 status;
 };
 
+struct aaudio_prop_addr {
+    u32 scope;
+    u32 selector;
+    u32 element;
+};
+#define AAUDIO_PROP(scope, sel, el) (struct aaudio_prop_addr) { scope, sel, el }
+
 enum {
     AAUDIO_MSG_TYPE_COMMAND = 1,
     AAUDIO_MSG_TYPE_RESPONSE = 2,
@@ -32,6 +40,8 @@ enum {
     AAUDIO_MSG_START_IO = 0,
     AAUDIO_MSG_START_IO_RESPONSE = 1,
     AAUDIO_MSG_UPDATE_TIMESTAMP = 4,
+    AAUDIO_MSG_SET_PROPERTY = 9,
+    AAUDIO_MSG_SET_PROPERTY_RESPONSE = 10,
     AAUDIO_MSG_SET_REMOTE_ACCESS = 32,
     AAUDIO_MSG_SET_REMOTE_ACCESS_RESPONSE = 33,
     AAUDIO_MSG_UPDATE_TIMESTAMP_RESPONSE = 34,
@@ -45,21 +55,34 @@ enum {
     AAUDIO_REMOTE_ACCESS_ON = 2
 };
 
+enum {
+    AAUDIO_PROP_SCOPE_GLOBAL = 0x676c6f62 // 'glob'
+};
+
+enum {
+    AAUDIO_PROP_SEL_VOLUME = 0x64656176 // 'deav'
+};
+
 int aaudio_msg_read_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
 
 int aaudio_msg_read_start_io_response(struct aaudio_msg *msg);
 int aaudio_msg_read_update_timestamp(struct aaudio_msg *msg, aaudio_device_id_t *devid,
         u64 *timestamp, u64 *update_seed);
+int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj);
 int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg);
 
 void aaudio_msg_write_start_io(struct aaudio_msg *msg, aaudio_device_id_t dev);
+void aaudio_msg_write_set_property(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size);
 void aaudio_msg_write_set_remote_access(struct aaudio_msg *msg, u64 mode);
 void aaudio_msg_write_alive_notification(struct aaudio_msg *msg, u32 proto_ver, u32 msg_ver);
 void aaudio_msg_write_update_timestamp_response(struct aaudio_msg *msg);
 
 
-int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode);
 int aaudio_cmd_start_io(struct aaudio_device *a, aaudio_device_id_t devid);
+int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size);
+int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode);
 
 
 
