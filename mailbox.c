@@ -84,7 +84,11 @@ void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg)
     ts->reg = reg;
 
     regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
-    iowrite32((u32) -4, regb + 1);
+
+    ioread32(regb);
+    mb();
+
+    iowrite32((u32) -4, regb + 2);
     iowrite32((u32) -1, regb);
 
     timer_setup(&ts->timer, bc_send_timestamp, 0);
@@ -110,10 +114,10 @@ static void bc_send_timestamp(struct timer_list *tl)
     ts = container_of(tl, struct bce_timestamp, timer);
     regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
     local_irq_save(flags);
-    ioread32(regb + 1);
+    ioread32(regb + 2);
     mb();
     bt = ktime_get_boottime();
-    iowrite32((u32) bt, regb + 1);
+    iowrite32((u32) bt, regb + 2);
     iowrite32((u32) (bt >> 32), regb);
     local_irq_restore(flags);
 
