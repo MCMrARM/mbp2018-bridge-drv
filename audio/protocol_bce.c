@@ -73,8 +73,6 @@ int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, cha
         *((u32 *) header->tag) = *((u32 *) tag);
     else
         aaudio_send_create_tag(b, &ctx->tag_n, header->tag);
-    header->type = AAUDIO_MSG_TYPE_NOTIFICATION;
-    header->device_id = 0;
     return 0;
 }
 
@@ -85,7 +83,7 @@ void __aaudio_send(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
     print_hex_dump(KERN_INFO, "aaudio:OUT ", DUMP_PREFIX_NONE, 32, 1, ctx->msg.data, ctx->msg.size, true);
     bce_set_submission_single(s, b->qout.dma_addr + (dma_addr_t) (ctx->msg.data - b->qout.data), ctx->msg.size);
     bce_submit_to_device(b->qout.sq);
-    b->qout.data_tail = (b->qout.data_tail + 1) % b->qout.el_size;
+    b->qout.data_tail = (b->qout.data_tail + 1) % b->qout.el_count;
     spin_unlock_irqrestore(&b->spinlock, ctx->irq_flags);
 }
 
@@ -148,7 +146,7 @@ static void aaudio_handle_reply(struct aaudio_bce *b, struct aaudio_msg *reply)
 static void aaudio_bce_out_queue_completion(struct bce_queue_sq *sq)
 {
     while (bce_next_completion(sq)) {
-        pr_info("aaudio: Send confirmed\n");
+        //pr_info("aaudio: Send confirmed\n");
         bce_notify_submission_complete(sq);
     }
 }
@@ -171,7 +169,7 @@ static void aaudio_bce_in_queue_completion(struct bce_queue_sq *sq)
         print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, min(msg.size, 128UL), true);
         aaudio_bce_in_queue_handle_msg(dev, &msg);
 
-        q->data_head = (q->data_head + 1) % q->el_size;
+        q->data_head = (q->data_head + 1) % q->el_count;
 
         bce_notify_submission_complete(sq);
         ++cnt;
@@ -205,7 +203,7 @@ void aaudio_bce_in_queue_submit_pending(struct aaudio_bce_queue *q, size_t count
         }
         s = bce_next_submission(q->sq);
         bce_set_submission_single(s, q->dma_addr + (dma_addr_t) (q->data_tail * q->el_size), q->el_size);
-        q->data_tail = (q->data_tail + 1) % q->el_size;
+        q->data_tail = (q->data_tail + 1) % q->el_count;
     }
     bce_submit_to_device(q->sq);
 }
