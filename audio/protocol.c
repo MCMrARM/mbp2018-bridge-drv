@@ -40,9 +40,23 @@ int aaudio_msg_read_update_timestamp(struct aaudio_msg *msg, aaudio_device_id_t 
     return 0;
 }
 
+int aaudio_msg_read_get_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj,
+        struct aaudio_prop_addr *prop, void **data, u64 *data_size)
+{
+    READ_START(AAUDIO_MSG_GET_PROPERTY_RESPONSE);
+    READ_VAR(aaudio_object_id_t, obj);
+    READ_VAR(u32, &prop->element);
+    READ_VAR(u32, &prop->scope);
+    READ_VAR(u32, &prop->selector);
+    READ_VAR(u64, data_size);
+    *data = ((u8 *) msg->data + offset);
+    /* offset += data_size; */
+    return 0;
+}
+
 int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj)
 {
-    READ_START(AAUDIO_MSG_UPDATE_TIMESTAMP_RESPONSE);
+    READ_START(AAUDIO_MSG_SET_PROPERTY_RESPONSE);
     READ_VAR(aaudio_object_id_t, obj);
     return 0;
 }
@@ -85,6 +99,20 @@ void aaudio_msg_write_stop_io(struct aaudio_msg *msg, aaudio_device_id_t dev)
 {
     WRITE_START_COMMAND(dev);
     WRITE_BASE(AAUDIO_MSG_STOP_IO);
+    WRITE_END();
+}
+
+void aaudio_msg_write_get_property(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *qualifier, size_t qualifier_size)
+{
+    WRITE_START_COMMAND(dev);
+    WRITE_BASE(AAUDIO_MSG_GET_PROPERTY);
+    WRITE_VAL(aaudio_object_id_t, obj);
+    WRITE_VAL(u32, prop.element);
+    WRITE_VAL(u32, prop.scope);
+    WRITE_VAL(u32, prop.selector);
+    WRITE_VAL(u64, qualifier_size);
+    WRITE_BIN(qualifier, qualifier_size);
     WRITE_END();
 }
 
@@ -169,8 +197,15 @@ int aaudio_cmd_stop_io(struct aaudio_device *a, aaudio_device_id_t devid)
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_stop_io, devid);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_stop_io_response);
 }
+int aaudio_cmd_get_property(struct aaudio_device *a, struct aaudio_msg *buf,
+        aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *qualifier, size_t qualifier_size, void **data, u64 *data_size)
+{
+    CMD_DEF_SHARED_NO_REPLY_AND_SEND(aaudio_msg_write_get_property, devid, obj, prop, qualifier, qualifier_size);
+    CMD_HNDL_REPLY_NO_FREE(aaudio_msg_read_get_property_response, &obj, &prop, data, data_size);
+}
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
-        struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size)
+        struct aaudio_prop_addr prop, void *qualifier, size_t qualifier_size, void *data, size_t data_size)
 {
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_set_property, devid, obj, prop, data, data_size,
             qualifier, qualifier_size);
