@@ -156,7 +156,7 @@ static int aaudio_init_cmd(struct aaudio_device *a)
     dev_info(a->dev, "Continuing init\n");
 
     buf = aaudio_reply_alloc();
-    if ((status = aaudio_cmd_get_device_list(a, &buf, &dev_cnt, &dev_l))) {
+    if ((status = aaudio_cmd_get_device_list(a, &buf, &dev_l, &dev_cnt))) {
         dev_err(a->dev, "Failed to get device list\n");
         aaudio_reply_free(&buf);
         return status;
