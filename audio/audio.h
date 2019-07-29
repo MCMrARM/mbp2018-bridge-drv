@@ -40,7 +40,12 @@ struct aaudio_buffer_struct {
 struct aaudio_subdevice {
     struct list_head list;
     aaudio_device_id_t dev_id;
+    u8 buf_id;
     char uid[AAUDIO_DEVICE_MAX_UID_LEN + 1];
+
+    dma_addr_t buf_in_dma_addr;
+    void *buf_in_ptr;
+    size_t buf_in_size;
 };
 
 struct aaudio_device {
@@ -48,6 +53,7 @@ struct aaudio_device {
     dev_t devt;
     struct device *dev;
     void __iomem *reg_mem_bs;
+    dma_addr_t reg_mem_bs_dma;
     void __iomem *reg_mem_cfg;
 
     u32 __iomem *reg_mem_gpr;

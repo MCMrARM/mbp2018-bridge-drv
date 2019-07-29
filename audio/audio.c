@@ -65,6 +65,7 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
         dev_warn(&dev->dev, "aaudio: pci_write_config_dword fail\n");
 
     dev_info(aaudio->dev, "aaudio: bs len = %llx\n", pci_resource_len(dev, 0));
+    aaudio->reg_mem_bs_dma = pci_resource_start(dev, 0);
     aaudio->reg_mem_bs = pci_iomap(dev, 0, 0);
     aaudio->reg_mem_cfg = pci_iomap(dev, 4, 0);
 
@@ -196,11 +197,12 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     }
     dev_info(a->dev, "Remote device %llx %.*s\n", dev_id, (int) uid_len, uid);
 
-    sdev = kmalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
+    sdev = kzalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
     INIT_LIST_HEAD(&sdev->list);
     sdev->dev_id = dev_id;
-    list_add_tail(&a->subdevice_list, &sdev->list);
     strncpy(sdev->uid, uid, uid_len);
+    sdev->uid[uid_len + 1] = '\0';
+    list_add_tail(&sdev->list, &a->subdevice_list);
 
     aaudio_reply_free(&buf);
 }
@@ -210,9 +212,22 @@ static void aaudio_free_dev(struct aaudio_device *a, struct aaudio_subdevice *sd
     kfree(sdev);
 }
 
+static struct aaudio_subdevice *aaudio_find_dev_by_uid(struct aaudio_device *a, const char *uid)
+{
+    struct aaudio_subdevice *sdev;
+    list_for_each_entry(sdev, &a->subdevice_list, list) {
+        if (!strcmp(uid, sdev->uid))
+            return sdev;
+    }
+    return NULL;
+}
+
 static int aaudio_init_bs(struct aaudio_device *a)
 {
     int i, j;
+    struct aaudio_buffer_struct_device *dev;
+    struct aaudio_subdevice *sdev;
+    struct aaudio_buffer_struct_buffer *buf;
     u32 ver, sig, bs_base;
 
     ver = ioread32(&a->reg_mem_gpr[0]);
@@ -228,20 +243,34 @@ static int aaudio_init_bs(struct aaudio_device *a)
     bs_base = ioread32(&a->reg_mem_gpr[2]);
     a->bs = (struct aaudio_buffer_struct *) ((u8 *) a->reg_mem_bs + bs_base);
     if (a->bs->signature != AAUDIO_SIG) {
-        dev_err(a->dev, "aaudio: Bad BS sig (%x)", a->bs->signature);
+        dev_err(a->dev, "aaudio: Bad BufferStruct sig (%x)", a->bs->signature);
         return -EINVAL;
     }
-    dev_info(a->dev, "aaudio: BS ver = %i\n", a->bs->version);
+    dev_info(a->dev, "aaudio: BufferStruct ver = %i\n", a->bs->version);
     dev_info(a->dev, "aaudio: Num devices = %i\n", a->bs->num_devices);
     for (i = 0; i < a->bs->num_devices; i++) {
-        dev_info(a->dev, "aaudio: Device %i %s\n", i, a->bs->devices[i].name);
-        for (j = 0; j < a->bs->devices[i].num_input_streams; j++) {
+        dev = &a->bs->devices[i];
+        dev_info(a->dev, "aaudio: Device %i %s\n", i, dev->name);
+        for (j = 0; j < dev->num_input_streams; j++) {
             dev_info(a->dev, "aaudio: Device %i Stream %i: Input; Buffer Count = %i\n", i, j,
-                    a->bs->devices[i].input_streams[j].num_buffers);
+                     dev->input_streams[j].num_buffers);
         }
-        for (j = 0; j < a->bs->devices[i].num_output_streams; j++) {
+        for (j = 0; j < dev->num_output_streams; j++) {
             dev_info(a->dev, "aaudio: Device %i Stream %i: Output; Buffer Count = %i\n", i, j,
-                     a->bs->devices[i].output_streams[j].num_buffers);
+                     dev->output_streams[j].num_buffers);
+        }
+
+        sdev = aaudio_find_dev_by_uid(a, dev->name);
+        if (!sdev) {
+            dev_err(a->dev, "aaudio: Subdevice not found for BufferStruct device %s\n", dev->name);
+            continue;
+        }
+        sdev->buf_id = (u8) i;
+        if (dev->num_input_streams > 0 && dev->input_streams[0].num_buffers > 0) {
+            buf = &dev->input_streams[0].buffers[0];
+            sdev->buf_in_dma_addr = a->reg_mem_bs_dma + (dma_addr_t) buf->address;
+            sdev->buf_in_ptr = a->reg_mem_bs + buf->address;
+            sdev->buf_in_size = buf->size;
         }
     }
 
