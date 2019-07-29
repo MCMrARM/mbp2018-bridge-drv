@@ -7,6 +7,8 @@
 
 #define AAUDIO_SIG 0x19870423
 
+struct snd_card;
+
 struct __attribute__((packed)) __attribute__((aligned(4))) aaudio_buffer_struct_buffer {
     size_t address;
     size_t size;
@@ -47,6 +49,8 @@ struct aaudio_device {
 
     struct bce_device *bce;
     struct aaudio_bce bcem;
+
+    struct snd_card *card;
 
     struct completion remote_alive;
 };

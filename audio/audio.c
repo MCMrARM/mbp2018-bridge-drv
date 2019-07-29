@@ -2,7 +2,12 @@
 #include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/random.h>
+#include <sound/core.h>
+#include <sound/initval.h>
 #include "audio.h"
+
+static int aaudio_alsa_index = SNDRV_DEFAULT_IDX1;
+static char *aaudio_alsa_id = SNDRV_DEFAULT_STR1;
 
 static dev_t aaudio_chrdev;
 static struct class *aaudio_class;
@@ -69,12 +74,27 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     if (aaudio_bce_init(aaudio)) {
         dev_warn(&dev->dev, "aaudio: Failed to init BCE command transport\n");
         goto fail;
-
     }
+
+    if (snd_card_new(aaudio->dev, aaudio_alsa_index, aaudio_alsa_id, THIS_MODULE, 0, &aaudio->card)) {
+        dev_warn(&dev->dev, "aaudio: Failed to create ALSA card\n");
+        goto fail;
+    }
+    strcpy(aaudio->card->driver, "Apple Audio");
+    strcpy(aaudio->card->shortname, "Apple T2 Audio");
+    strcpy(aaudio->card->longname, "Apple T2 Audio");
+
     aaudio_init(aaudio);
+
+    if (snd_card_register(aaudio->card)) {
+        dev_warn(&dev->dev, "aaudio: Failed to register ALSA sound device\n");
+        goto fail_snd;
+    }
 
     return 0;
 
+fail_snd:
+    snd_card_free(aaudio->card);
 fail:
     if (aaudio && aaudio->dev)
         device_destroy(aaudio_class, aaudio->devt);
@@ -97,6 +117,7 @@ static void aaudio_remove(struct pci_dev *dev)
 {
     struct aaudio_device *aaudio = pci_get_drvdata(dev);
 
+    snd_card_free(aaudio->card);
     pci_iounmap(dev, aaudio->reg_mem_bs);
     pci_iounmap(dev, aaudio->reg_mem_cfg);
     device_destroy(aaudio_class, aaudio->devt);
@@ -267,3 +288,8 @@ void aaudio_module_exit(void)
     class_destroy(aaudio_class);
     unregister_chrdev_region(aaudio_chrdev, 1);
 }
+
+module_param_named(index, aaudio_alsa_index, int, 0444);
+MODULE_PARM_DESC(index, "Index value for Apple Internal Audio soundcard.");
+module_param_named(id, aaudio_alsa_id, charp, 0444);
+MODULE_PARM_DESC(id, "ID string for Apple Internal Audio soundcard.");
