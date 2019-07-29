@@ -39,6 +39,8 @@ enum {
 enum {
     AAUDIO_MSG_START_IO = 0,
     AAUDIO_MSG_START_IO_RESPONSE = 1,
+    AAUDIO_MSG_STOP_IO = 2,
+    AAUDIO_MSG_STOP_IO_RESPONSE = 3,
     AAUDIO_MSG_UPDATE_TIMESTAMP = 4,
     AAUDIO_MSG_SET_PROPERTY = 9,
     AAUDIO_MSG_SET_PROPERTY_RESPONSE = 10,
@@ -66,12 +68,14 @@ enum {
 int aaudio_msg_read_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
 
 int aaudio_msg_read_start_io_response(struct aaudio_msg *msg);
+int aaudio_msg_read_stop_io_response(struct aaudio_msg *msg);
 int aaudio_msg_read_update_timestamp(struct aaudio_msg *msg, aaudio_device_id_t *devid,
         u64 *timestamp, u64 *update_seed);
 int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj);
 int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg);
 
 void aaudio_msg_write_start_io(struct aaudio_msg *msg, aaudio_device_id_t dev);
+void aaudio_msg_write_stop_io(struct aaudio_msg *msg, aaudio_device_id_t dev);
 void aaudio_msg_write_set_property(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size);
 void aaudio_msg_write_set_remote_access(struct aaudio_msg *msg, u64 mode);
@@ -80,6 +84,7 @@ void aaudio_msg_write_update_timestamp_response(struct aaudio_msg *msg);
 
 
 int aaudio_cmd_start_io(struct aaudio_device *a, aaudio_device_id_t devid);
+int aaudio_cmd_stop_io(struct aaudio_device *a, aaudio_device_id_t devid);
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size);
 int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode);

@@ -24,6 +24,12 @@ int aaudio_msg_read_start_io_response(struct aaudio_msg *msg)
     return 0;
 }
 
+int aaudio_msg_read_stop_io_response(struct aaudio_msg *msg)
+{
+    READ_START(AAUDIO_MSG_STOP_IO_RESPONSE);
+    return 0;
+}
+
 int aaudio_msg_read_update_timestamp(struct aaudio_msg *msg, aaudio_device_id_t *devid,
         u64 *timestamp, u64 *update_seed)
 {
@@ -63,6 +69,13 @@ void aaudio_msg_write_start_io(struct aaudio_msg *msg, aaudio_device_id_t dev)
 {
     WRITE_START_COMMAND(dev);
     WRITE_BASE(AAUDIO_MSG_START_IO);
+    WRITE_END();
+}
+
+void aaudio_msg_write_stop_io(struct aaudio_msg *msg, aaudio_device_id_t dev)
+{
+    WRITE_START_COMMAND(dev);
+    WRITE_BASE(AAUDIO_MSG_STOP_IO);
     WRITE_END();
 }
 
@@ -125,6 +138,11 @@ int aaudio_cmd_start_io(struct aaudio_device *a, aaudio_device_id_t devid)
 {
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_start_io, devid);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_start_io_response);
+}
+int aaudio_cmd_stop_io(struct aaudio_device *a, aaudio_device_id_t devid)
+{
+    CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_stop_io, devid);
+    CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_stop_io_response);
 }
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *data, size_t data_size, void *qualifier, size_t qualifier_size)
