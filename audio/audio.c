@@ -13,6 +13,7 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
     struct aaudio_device *aaudio = NULL;
     int status = 0;
+    u32 cfg;
 
     pr_info("aaudio: capturing our device\n");
 
@@ -47,6 +48,12 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     }
 
     init_completion(&aaudio->remote_alive);
+
+    /* Init: set an unknown flag in the bitset */
+    if (pci_read_config_dword(dev, 4, &cfg))
+        dev_warn(&dev->dev, "aaudio: pci_read_config_dword fail\n");
+    if (pci_write_config_dword(dev, 4, cfg | 6u))
+        dev_warn(&dev->dev, "aaudio: pci_write_config_dword fail\n");
 
     dev_info(aaudio->dev, "aaudio: bs len = %llx\n", pci_resource_len(dev, 0));
     aaudio->reg_mem_bs = pci_iomap(dev, 0, 0);
