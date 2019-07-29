@@ -53,6 +53,15 @@ int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg)
     return 0;
 }
 
+int aaudio_msg_read_get_device_list_response(struct aaudio_msg *msg, u64 *dev_cnt, aaudio_device_id_t **dev_l)
+{
+    READ_START(AAUDIO_MSG_GET_DEVICE_LIST_RESPONSE);
+    READ_VAR(u64, dev_cnt);
+    *dev_l = (aaudio_device_id_t *) ((u8 *) msg->data + offset);
+    /* offset += dev_cnt * sizeof(aaudio_device_id_t); */
+    return 0;
+}
+
 #define WRITE_START_OF_TYPE(typev, devid) \
     size_t offset = sizeof(struct aaudio_msg_header); (void) offset; \
     ((struct aaudio_msg_header *) msg->data)->type = (typev); \
@@ -119,18 +128,34 @@ void aaudio_msg_write_update_timestamp_response(struct aaudio_msg *msg)
     WRITE_END();
 }
 
-#define CMD_SHARED_VARS \
+void aaudio_msg_write_get_device_list(struct aaudio_msg *msg)
+{
+    WRITE_START_COMMAND(0);
+    WRITE_BASE(AAUDIO_MSG_GET_DEVICE_LIST);
+    WRITE_END();
+}
+
+#define CMD_SHARED_VARS_NO_REPLY \
     int status = 0; \
-    struct aaudio_send_ctx sctx; \
-    struct aaudio_msg reply = aaudio_reply_alloc();
+    struct aaudio_send_ctx sctx;
+#define CMD_SHARED_VARS \
+    CMD_SHARED_VARS_NO_REPLY \
+    struct aaudio_msg reply = aaudio_reply_alloc(); \
+    struct aaudio_msg *buf = &reply;
 #define CMD_SEND_REQUEST(fn, ...) \
-    if ((status = aaudio_send_cmd_sync(a, &sctx, &reply, 500, fn, __VA_ARGS__))) \
+    if ((status = aaudio_send_cmd_sync(a, &sctx, buf, 500, fn, ##__VA_ARGS__))) \
         return status;
 #define CMD_DEF_SHARED_AND_SEND(fn, ...) \
     CMD_SHARED_VARS \
     CMD_SEND_REQUEST(fn, ##__VA_ARGS__);
+#define CMD_DEF_SHARED_NO_REPLY_AND_SEND(fn, ...) \
+    CMD_SHARED_VARS_NO_REPLY \
+    CMD_SEND_REQUEST(fn, ##__VA_ARGS__);
+#define CMD_HNDL_REPLY_NO_FREE(fn, ...) \
+    status = fn(buf, ##__VA_ARGS__); \
+    return status;
 #define CMD_HNDL_REPLY_AND_FREE(fn, ...) \
-    status = fn(&reply, ##__VA_ARGS__); \
+    status = fn(buf, ##__VA_ARGS__); \
     aaudio_reply_free(&reply); \
     return status;
 
@@ -155,4 +180,10 @@ int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode)
 {
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_set_remote_access, mode);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_set_remote_access_response);
+}
+int aaudio_cmd_get_device_list(struct aaudio_device *a, struct aaudio_msg *buf,
+        u64 *dev_cnt, aaudio_device_id_t **dev_l)
+{
+    CMD_DEF_SHARED_NO_REPLY_AND_SEND(aaudio_msg_write_get_device_list);
+    CMD_HNDL_REPLY_NO_FREE(aaudio_msg_read_get_device_list_response, dev_cnt, dev_l);
 }

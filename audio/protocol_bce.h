@@ -60,7 +60,7 @@ int __aaudio_send_cmd_sync(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, st
     (ctx)->timeout = msecs_to_jiffies(tout); \
     (ctx)->status = __aaudio_send_prepare(&(a)->bcem, (ctx), NULL); \
     if (!(ctx)->status) { \
-        fn(&(ctx)->msg, __VA_ARGS__); \
+        fn(&(ctx)->msg, ##__VA_ARGS__); \
         (ctx)->status = __aaudio_send_cmd_sync(&(a)->bcem, (ctx), (reply)); \
     } \
     (ctx)->status; \

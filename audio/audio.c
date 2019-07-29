@@ -12,7 +12,8 @@ static char *aaudio_alsa_id = SNDRV_DEFAULT_STR1;
 static dev_t aaudio_chrdev;
 static struct class *aaudio_class;
 
-static int aaudio_init(struct aaudio_device *a);
+static int aaudio_init_cmd(struct aaudio_device *a);
+static int aaudio_init_bs(struct aaudio_device *a);
 
 static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -77,17 +78,24 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     }
 
     if (snd_card_new(aaudio->dev, aaudio_alsa_index, aaudio_alsa_id, THIS_MODULE, 0, &aaudio->card)) {
-        dev_warn(&dev->dev, "aaudio: Failed to create ALSA card\n");
+        dev_err(&dev->dev, "aaudio: Failed to create ALSA card\n");
         goto fail;
     }
     strcpy(aaudio->card->driver, "Apple Audio");
     strcpy(aaudio->card->shortname, "Apple T2 Audio");
     strcpy(aaudio->card->longname, "Apple T2 Audio");
 
-    aaudio_init(aaudio);
+    if (aaudio_init_cmd(aaudio)) {
+        dev_err(&dev->dev, "aaudio: Failed to initialize over BCE\n");
+        goto fail_snd;
+    }
+    if (aaudio_init_bs(aaudio)) {
+        dev_err(&dev->dev, "aaudio: Failed to initialize BufferStruct\n");
+        goto fail_snd;
+    }
 
     if (snd_card_register(aaudio->card)) {
-        dev_warn(&dev->dev, "aaudio: Failed to register ALSA sound device\n");
+        dev_err(&dev->dev, "aaudio: Failed to register ALSA sound device\n");
         goto fail_snd;
     }
 
@@ -127,12 +135,49 @@ static void aaudio_remove(struct pci_dev *dev)
     kfree(aaudio);
 }
 
-static int aaudio_init(struct aaudio_device *a)
+static int aaudio_init_cmd(struct aaudio_device *a)
 {
     int status;
+    struct aaudio_send_ctx sctx;
+    struct aaudio_msg buf;
+    u64 dev_cnt, dev_i;
+    aaudio_device_id_t *dev_l;
+
+    if ((status = aaudio_send(a, &sctx, 500,
+                              aaudio_msg_write_alive_notification, 1, 3))) {
+        dev_err(a->dev, "Sending alive notification failed\n");
+        return status;
+    }
+
+    if (wait_for_completion_timeout(&a->remote_alive, msecs_to_jiffies(500)) == 0) {
+        dev_err(a->dev, "Timed out waiting for remote\n");
+        return -ETIMEDOUT;
+    }
+    dev_info(a->dev, "Continuing init\n");
+
+    buf = aaudio_reply_alloc();
+    if ((status = aaudio_cmd_get_device_list(a, &buf, &dev_cnt, &dev_l))) {
+        dev_err(a->dev, "Failed to get device list\n");
+        aaudio_reply_free(&buf);
+        return status;
+    }
+    for (dev_i = 0; dev_i < dev_cnt; ++dev_i) {
+        dev_info(a->dev, "Remote device: %llx\n", dev_l[dev_i]);
+    }
+    aaudio_reply_free(&buf);
+
+    if ((status = aaudio_cmd_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
+        dev_err(a->dev, "Failed to set remote access\n");
+        return status;
+    }
+
+    return 0;
+}
+
+static int aaudio_init_bs(struct aaudio_device *a)
+{
     int i, j;
     u32 ver, sig, bs_base;
-    struct aaudio_send_ctx sctx;
 
     ver = ioread32(&a->reg_mem_gpr[0]);
     if (ver < 3) {
@@ -163,25 +208,6 @@ static int aaudio_init(struct aaudio_device *a)
                      a->bs->devices[i].output_streams[j].num_buffers);
         }
     }
-
-    if ((status = aaudio_send(a, &sctx, 500,
-            aaudio_msg_write_alive_notification, 1, 3))) {
-        pr_err("Sending alive notification failed\n");
-        return status;
-    }
-
-    if (wait_for_completion_timeout(&a->remote_alive, msecs_to_jiffies(500)) == 0) {
-        pr_err("Timed out waiting for remote\n");
-        return -ETIMEDOUT;
-    }
-    dev_info(a->dev, "aaudio: Continuing init\n");
-
-    if ((status = aaudio_cmd_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
-        pr_err("Failed to set remote access\n");
-        return status;
-    }
-
-    aaudio_cmd_start_io(a, 0x3a);
 
     return 0;
 }
