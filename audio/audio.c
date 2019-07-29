@@ -14,6 +14,7 @@ static struct class *aaudio_class;
 
 static int aaudio_init_cmd(struct aaudio_device *a);
 static int aaudio_init_bs(struct aaudio_device *a);
+static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id);
 
 static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -161,9 +162,8 @@ static int aaudio_init_cmd(struct aaudio_device *a)
         aaudio_reply_free(&buf);
         return status;
     }
-    for (dev_i = 0; dev_i < dev_cnt; ++dev_i) {
-        dev_info(a->dev, "Remote device: %llx\n", dev_l[dev_i]);
-    }
+    for (dev_i = 0; dev_i < dev_cnt; ++dev_i)
+        aaudio_init_dev(a, dev_l[dev_i]);
     aaudio_reply_free(&buf);
 
     if ((status = aaudio_cmd_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
@@ -172,6 +172,21 @@ static int aaudio_init_cmd(struct aaudio_device *a)
     }
 
     return 0;
+}
+
+static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
+{
+    struct aaudio_msg buf = aaudio_reply_alloc();
+    char *name;
+    u64 name_len;
+    if (aaudio_cmd_get_property(a, &buf, dev_id, dev_id, AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_UID, 0),
+            NULL, 0, (void **) &name, &name_len)) {
+        dev_err(a->dev, "Failed to get device uid for device %llx", dev_id);
+        aaudio_reply_free(&buf);
+        return;
+    }
+    dev_info(a->dev, "Remote device %llx %.*s\n", dev_id, (int) name_len, name);
+    aaudio_reply_free(&buf);
 }
 
 static int aaudio_init_bs(struct aaudio_device *a)

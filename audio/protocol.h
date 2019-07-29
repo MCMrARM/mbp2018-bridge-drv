@@ -66,6 +66,7 @@ enum {
 };
 
 enum {
+    AAUDIO_PROP_UID        = 0x75696420, // 'uid '
     AAUDIO_PROP_SEL_VOLUME = 0x64656176 // 'deav'
 };
 
