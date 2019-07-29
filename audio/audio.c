@@ -15,6 +15,7 @@ static struct class *aaudio_class;
 static int aaudio_init_cmd(struct aaudio_device *a);
 static int aaudio_init_bs(struct aaudio_device *a);
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id);
+static void aaudio_free_dev(struct aaudio_device *a, struct aaudio_subdevice *sdev);
 
 static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
@@ -55,6 +56,7 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     }
 
     init_completion(&aaudio->remote_alive);
+    INIT_LIST_HEAD(&aaudio->subdevice_list);
 
     /* Init: set an unknown flag in the bitset */
     if (pci_read_config_dword(dev, 4, &cfg))
@@ -124,8 +126,14 @@ fail:
 
 static void aaudio_remove(struct pci_dev *dev)
 {
+    struct aaudio_subdevice *sdev;
     struct aaudio_device *aaudio = pci_get_drvdata(dev);
 
+    while (!list_empty(&aaudio->subdevice_list)) {
+        sdev = list_first_entry(&aaudio->subdevice_list, struct aaudio_subdevice, list);
+        list_del(&sdev->list);
+        aaudio_free_dev(aaudio, sdev);
+    }
     snd_card_free(aaudio->card);
     pci_iounmap(dev, aaudio->reg_mem_bs);
     pci_iounmap(dev, aaudio->reg_mem_cfg);
@@ -176,17 +184,30 @@ static int aaudio_init_cmd(struct aaudio_device *a)
 
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
 {
+    struct aaudio_subdevice *sdev;
     struct aaudio_msg buf = aaudio_reply_alloc();
-    char *name;
-    u64 name_len;
+    char *uid;
+    u64 uid_len;
     if (aaudio_cmd_get_property(a, &buf, dev_id, dev_id, AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_UID, 0),
-            NULL, 0, (void **) &name, &name_len)) {
+            NULL, 0, (void **) &uid, &uid_len) || uid_len > AAUDIO_DEVICE_MAX_UID_LEN) {
         dev_err(a->dev, "Failed to get device uid for device %llx", dev_id);
         aaudio_reply_free(&buf);
         return;
     }
-    dev_info(a->dev, "Remote device %llx %.*s\n", dev_id, (int) name_len, name);
+    dev_info(a->dev, "Remote device %llx %.*s\n", dev_id, (int) uid_len, uid);
+
+    sdev = kmalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
+    INIT_LIST_HEAD(&sdev->list);
+    sdev->dev_id = dev_id;
+    list_add_tail(&a->subdevice_list, &sdev->list);
+    strncpy(sdev->uid, uid, uid_len);
+
     aaudio_reply_free(&buf);
+}
+
+static void aaudio_free_dev(struct aaudio_device *a, struct aaudio_subdevice *sdev)
+{
+    kfree(sdev);
 }
 
 static int aaudio_init_bs(struct aaudio_device *a)
