@@ -183,26 +183,29 @@ static int aaudio_init_cmd(struct aaudio_device *a)
     return 0;
 }
 
+static void aaudio_query_stream_info(struct aaudio_device *a, aaudio_device_id_t dev_id, struct aaudio_stream *strm);
+
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
 {
     struct aaudio_subdevice *sdev;
     struct aaudio_msg buf = aaudio_reply_alloc();
+    u64 uid_len, stream_cnt, i;
+    aaudio_object_id_t *stream_list;
     char *uid;
-    u64 uid_len;
     /* TESTING: Disable devices other than Speaker */
     if (dev_id != 0x3a) {
         return;
     }
 
+    sdev = kzalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
+
     if (aaudio_cmd_get_property(a, &buf, dev_id, dev_id, AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_UID, 0),
             NULL, 0, (void **) &uid, &uid_len) || uid_len > AAUDIO_DEVICE_MAX_UID_LEN) {
-        dev_err(a->dev, "Failed to get device uid for device %llx", dev_id);
-        aaudio_reply_free(&buf);
-        return;
+        dev_err(a->dev, "Failed to get device uid for device %llx\n", dev_id);
+        goto fail;
     }
     dev_info(a->dev, "Remote device %llx %.*s\n", dev_id, (int) uid_len, uid);
 
-    sdev = kzalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
     sdev->a = a;
     INIT_LIST_HEAD(&sdev->list);
     sdev->dev_id = dev_id;
@@ -210,11 +213,71 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     sdev->uid[uid_len + 1] = '\0';
     list_add_tail(&sdev->list, &a->subdevice_list);
 
+    if (aaudio_cmd_get_primitive_property(a, dev_id, dev_id,
+            AAUDIO_PROP(AAUDIO_PROP_SCOPE_INPUT, AAUDIO_PROP_LATENCY, 0), NULL, 0, &sdev->in_latency, sizeof(u32)))
+        dev_warn(a->dev, "Failed to query device input latency\n");
+    if (aaudio_cmd_get_primitive_property(a, dev_id, dev_id,
+            AAUDIO_PROP(AAUDIO_PROP_SCOPE_OUTPUT, AAUDIO_PROP_LATENCY, 0), NULL, 0, &sdev->out_latency, sizeof(u32)))
+        dev_warn(a->dev, "Failed to query device output latency\n");
+
+    if (aaudio_cmd_get_input_stream_list(a, &buf, dev_id, &stream_list, &stream_cnt)) {
+        dev_err(a->dev, "Failed to get input stream list for device %llx\n", dev_id);
+        goto fail;
+    }
+    if (stream_cnt > AAUDIO_DEIVCE_MAX_INPUT_STREAMS) {
+        dev_warn(a->dev, "Device %s input stream count %llu is larger than the supported count of %u\n",
+                sdev->uid, stream_cnt, AAUDIO_DEIVCE_MAX_INPUT_STREAMS);
+        stream_cnt = AAUDIO_DEIVCE_MAX_INPUT_STREAMS;
+    }
+    sdev->in_stream_cnt = stream_cnt;
+    for (i = 0; i < stream_cnt; i++) {
+        sdev->in_streams[i].id = stream_list[i];
+        sdev->in_streams[i].buffer_cnt = 0;
+        aaudio_query_stream_info(a, dev_id, &sdev->in_streams[i]);
+    }
+
+    if (aaudio_cmd_get_output_stream_list(a, &buf, dev_id, &stream_list, &stream_cnt)) {
+        dev_err(a->dev, "Failed to get output stream list for device %llx\n", dev_id);
+        goto fail;
+    }
+    if (stream_cnt > AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS) {
+        dev_warn(a->dev, "Device %s input stream count %llu is larger than the supported count of %u\n",
+                 sdev->uid, stream_cnt, AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS);
+        stream_cnt = AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS;
+    }
+    sdev->out_stream_cnt = stream_cnt;
+    for (i = 0; i < stream_cnt; i++) {
+        sdev->out_streams[i].id = stream_list[i];
+        sdev->out_streams[i].buffer_cnt = 0;
+        aaudio_query_stream_info(a, dev_id, &sdev->out_streams[i]);
+    }
+
     aaudio_reply_free(&buf);
+    return;
+
+fail:
+    aaudio_reply_free(&buf);
+    kfree(sdev);
+}
+
+static void aaudio_query_stream_info(struct aaudio_device *a, aaudio_device_id_t dev_id, struct aaudio_stream *strm)
+{
+    if (aaudio_cmd_get_primitive_property(a, dev_id, strm->id,
+            AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_LATENCY, 0), NULL, 0, &strm->latency, sizeof(u32)))
+        dev_warn(a->dev, "Failed to query stream latency\n");
 }
 
 static void aaudio_free_dev(struct aaudio_subdevice *sdev)
 {
+    size_t i;
+    for (i = 0; i < sdev->in_stream_cnt; i++) {
+        if (sdev->in_streams[i].buffers)
+            kfree(sdev->in_streams[i].buffers);
+    }
+    for (i = 0; i < sdev->out_stream_cnt; i++) {
+        if (sdev->out_streams[i].buffers)
+            kfree(sdev->out_streams[i].buffers);
+    }
     kfree(sdev);
 }
 
@@ -228,12 +291,14 @@ static struct aaudio_subdevice *aaudio_find_dev_by_uid(struct aaudio_device *a, 
     return NULL;
 }
 
+static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream *strm,
+        struct aaudio_buffer_struct_stream *bs_strm);
+
 static int aaudio_init_bs(struct aaudio_device *a)
 {
     int i, j;
     struct aaudio_buffer_struct_device *dev;
     struct aaudio_subdevice *sdev;
-    struct aaudio_buffer_struct_buffer *buf;
     u32 ver, sig, bs_base;
 
     ver = ioread32(&a->reg_mem_gpr[0]);
@@ -257,14 +322,6 @@ static int aaudio_init_bs(struct aaudio_device *a)
     for (i = 0; i < a->bs->num_devices; i++) {
         dev = &a->bs->devices[i];
         dev_info(a->dev, "aaudio: Device %i %s\n", i, dev->name);
-        for (j = 0; j < dev->num_input_streams; j++) {
-            dev_info(a->dev, "aaudio: Device %i Stream %i: Input; Buffer Count = %i\n", i, j,
-                     dev->input_streams[j].num_buffers);
-        }
-        for (j = 0; j < dev->num_output_streams; j++) {
-            dev_info(a->dev, "aaudio: Device %i Stream %i: Output; Buffer Count = %i\n", i, j,
-                     dev->output_streams[j].num_buffers);
-        }
 
         sdev = aaudio_find_dev_by_uid(a, dev->name);
         if (!sdev) {
@@ -272,15 +329,43 @@ static int aaudio_init_bs(struct aaudio_device *a)
             continue;
         }
         sdev->buf_id = (u8) i;
-        if (dev->num_input_streams > 0 && dev->input_streams[0].num_buffers > 0) {
-            buf = &dev->input_streams[0].buffers[0];
-            sdev->buf_in_dma_addr = a->reg_mem_bs_dma + (dma_addr_t) buf->address;
-            sdev->buf_in_ptr = a->reg_mem_bs + buf->address;
-            sdev->buf_in_size = buf->size;
+        for (j = 0; j < dev->num_input_streams; j++) {
+            dev_info(a->dev, "aaudio: Device %i Stream %i: Input; Buffer Count = %i\n", i, j,
+                     dev->input_streams[j].num_buffers);
+            if (j < sdev->in_stream_cnt)
+                aaudio_init_bs_stream(a, &sdev->in_streams[j], &dev->input_streams[j]);
+        }
+        for (j = 0; j < dev->num_output_streams; j++) {
+            dev_info(a->dev, "aaudio: Device %i Stream %i: Output; Buffer Count = %i\n", i, j,
+                     dev->output_streams[j].num_buffers);
+            if (j < sdev->out_stream_cnt)
+                aaudio_init_bs_stream(a, &sdev->out_streams[j], &dev->output_streams[j]);
         }
     }
 
     return 0;
+}
+
+static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream *strm,
+                                  struct aaudio_buffer_struct_stream *bs_strm)
+{
+    size_t i;
+    strm->buffer_cnt = bs_strm->num_buffers;
+    if (bs_strm->num_buffers > AAUDIO_DEIVCE_MAX_BUFFER_COUNT) {
+        dev_warn(a->dev, "BufferStruct buffer count %u exceeds driver limit of %u\n", bs_strm->num_buffers,
+                AAUDIO_DEIVCE_MAX_BUFFER_COUNT);
+        strm->buffer_cnt = AAUDIO_DEIVCE_MAX_BUFFER_COUNT;
+    }
+    strm->buffers = kmalloc_array(strm->buffer_cnt, sizeof(struct aaudio_dma_buf), GFP_KERNEL);
+    if (!strm->buffers) {
+        dev_err(a->dev, "Buffer list allocation failed\n");
+        return;
+    }
+    for (i = 0; i < strm->buffer_cnt; i++) {
+        strm->buffers[i].dma_addr = a->reg_mem_bs_dma + (dma_addr_t) bs_strm->buffers[i].address;
+        strm->buffers[i].ptr = a->reg_mem_bs + bs_strm->buffers[i].address;
+        strm->buffers[i].size = bs_strm->buffers[i].size;
+    }
 }
 
 void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)

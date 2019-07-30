@@ -66,12 +66,15 @@ enum {
 };
 
 enum {
-    AAUDIO_PROP_SCOPE_GLOBAL = 0x676c6f62 // 'glob'
+    AAUDIO_PROP_SCOPE_GLOBAL = 0x676c6f62, // 'glob'
+    AAUDIO_PROP_SCOPE_INPUT  = 0x696e7074, // 'inpt'
+    AAUDIO_PROP_SCOPE_OUTPUT = 0x6f757470  // 'outp'
 };
 
 enum {
     AAUDIO_PROP_UID        = 0x75696420, // 'uid '
-    AAUDIO_PROP_SEL_VOLUME = 0x64656176 // 'deav'
+    AAUDIO_PROP_SEL_VOLUME = 0x64656176, // 'deav'
+    AAUDIO_PROP_LATENCY    = 0x6c746e63  // 'ltnc'
 };
 
 int aaudio_msg_read_base(struct aaudio_msg *msg, struct aaudio_msg_base *base);
@@ -107,6 +110,9 @@ int aaudio_cmd_stop_io(struct aaudio_device *a, aaudio_device_id_t devid);
 int aaudio_cmd_get_property(struct aaudio_device *a, struct aaudio_msg *buf,
         aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void **data, u64 *data_size);
+int aaudio_cmd_get_primitive_property(struct aaudio_device *a,
+        aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size);
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size);
 int aaudio_cmd_get_input_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,

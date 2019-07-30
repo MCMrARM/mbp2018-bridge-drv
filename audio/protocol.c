@@ -236,6 +236,26 @@ int aaudio_cmd_get_property(struct aaudio_device *a, struct aaudio_msg *buf,
     CMD_DEF_SHARED_NO_REPLY_AND_SEND(aaudio_msg_write_get_property, devid, obj, prop, qualifier, qualifier_size);
     CMD_HNDL_REPLY_NO_FREE(aaudio_msg_read_get_property_response, &obj, &prop, data, data_size);
 }
+int aaudio_cmd_get_primitive_property(struct aaudio_device *a,
+        aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size)
+{
+    int status;
+    struct aaudio_msg reply = aaudio_reply_alloc();
+    void *r_data;
+    u64 r_data_size;
+    if ((status = aaudio_cmd_get_property(a, &reply, devid, obj, prop, qualifier, qualifier_size,
+            &r_data, &r_data_size)))
+        goto finish;
+    if (r_data_size != data_size) {
+        status = -EINVAL;
+        goto finish;
+    }
+    memcpy(data, r_data, data_size);
+finish:
+    aaudio_reply_free(&reply);
+    return status;
+}
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size)
 {

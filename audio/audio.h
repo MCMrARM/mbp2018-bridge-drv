@@ -8,7 +8,9 @@
 #define AAUDIO_SIG 0x19870423
 
 #define AAUDIO_DEVICE_MAX_UID_LEN 128
-#define AAUDIO_DEIVCE_MAX_INPUT_BUFFERS 1
+#define AAUDIO_DEIVCE_MAX_INPUT_STREAMS 1
+#define AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS 1
+#define AAUDIO_DEIVCE_MAX_BUFFER_COUNT 1
 
 struct snd_card;
 
@@ -39,16 +41,29 @@ struct aaudio_buffer_struct {
 };
 
 struct aaudio_device;
+struct aaudio_dma_buf {
+    dma_addr_t dma_addr;
+    void *ptr;
+    size_t size;
+};
+struct aaudio_stream {
+    aaudio_object_id_t id;
+    size_t buffer_cnt;
+    struct aaudio_dma_buf *buffers;
+
+    u32 latency;
+};
 struct aaudio_subdevice {
     struct aaudio_device *a;
     struct list_head list;
     aaudio_device_id_t dev_id;
+    u32 in_latency, out_latency;
     u8 buf_id;
     char uid[AAUDIO_DEVICE_MAX_UID_LEN + 1];
-
-    dma_addr_t buf_in_dma_addr;
-    void *buf_in_ptr;
-    size_t buf_in_size;
+    size_t in_stream_cnt;
+    struct aaudio_stream in_streams[AAUDIO_DEIVCE_MAX_INPUT_STREAMS];
+    size_t out_stream_cnt;
+    struct aaudio_stream out_streams[AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS];
 };
 
 struct aaudio_device {
