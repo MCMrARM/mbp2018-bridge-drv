@@ -61,6 +61,24 @@ int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_
     return 0;
 }
 
+int aaudio_msg_read_get_input_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt)
+{
+    READ_START(AAUDIO_MSG_GET_INPUT_STREAM_LIST_RESPONSE);
+    READ_VAR(u64, str_cnt);
+    *str_l = (aaudio_device_id_t *) ((u8 *) msg->data + offset);
+    /* offset += str_cnt * sizeof(aaudio_object_id_t); */
+    return 0;
+}
+
+int aaudio_msg_read_get_output_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt)
+{
+    READ_START(AAUDIO_MSG_GET_OUTPUT_STREAM_LIST_RESPONSE);
+    READ_VAR(u64, str_cnt);
+    *str_l = (aaudio_device_id_t *) ((u8 *) msg->data + offset);
+    /* offset += str_cnt * sizeof(aaudio_object_id_t); */
+    return 0;
+}
+
 int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg)
 {
     READ_START(AAUDIO_MSG_SET_REMOTE_ACCESS_RESPONSE);
@@ -129,6 +147,20 @@ void aaudio_msg_write_set_property(struct aaudio_msg *msg, aaudio_device_id_t de
     WRITE_BIN(data, data_size);
     WRITE_VAL(u64, qualifier_size);
     WRITE_BIN(qualifier, qualifier_size);
+    WRITE_END();
+}
+
+void aaudio_msg_write_get_input_stream_list(struct aaudio_msg *msg, aaudio_device_id_t devid)
+{
+    WRITE_START_COMMAND(devid);
+    WRITE_BASE(AAUDIO_MSG_GET_INPUT_STREAM_LIST);
+    WRITE_END();
+}
+
+void aaudio_msg_write_get_output_stream_list(struct aaudio_msg *msg, aaudio_device_id_t devid)
+{
+    WRITE_START_COMMAND(devid);
+    WRITE_BASE(AAUDIO_MSG_GET_OUTPUT_STREAM_LIST);
     WRITE_END();
 }
 
@@ -210,6 +242,18 @@ int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, a
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_set_property, devid, obj, prop, data, data_size,
             qualifier, qualifier_size);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_set_property_response, &obj);
+}
+int aaudio_cmd_get_input_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,
+        aaudio_object_id_t **str_l, u64 *str_cnt)
+{
+    CMD_DEF_SHARED_NO_REPLY_AND_SEND(aaudio_msg_write_get_input_stream_list, devid);
+    CMD_HNDL_REPLY_NO_FREE(aaudio_msg_read_get_input_stream_list_response, str_l, str_cnt);
+}
+int aaudio_cmd_get_output_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,
+        aaudio_object_id_t **str_l, u64 *str_cnt)
+{
+    CMD_DEF_SHARED_NO_REPLY_AND_SEND(aaudio_msg_write_get_output_stream_list, devid);
+    CMD_HNDL_REPLY_NO_FREE(aaudio_msg_read_get_output_stream_list_response, str_l, str_cnt);
 }
 int aaudio_cmd_set_remote_access(struct aaudio_device *a, u64 mode)
 {
