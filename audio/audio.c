@@ -132,12 +132,12 @@ static void aaudio_remove(struct pci_dev *dev)
     struct aaudio_subdevice *sdev;
     struct aaudio_device *aaudio = pci_get_drvdata(dev);
 
+    snd_card_free(aaudio->card);
     while (!list_empty(&aaudio->subdevice_list)) {
         sdev = list_first_entry(&aaudio->subdevice_list, struct aaudio_subdevice, list);
         list_del(&sdev->list);
         aaudio_free_dev(sdev);
     }
-    snd_card_free(aaudio->card);
     pci_iounmap(dev, aaudio->reg_mem_bs);
     pci_iounmap(dev, aaudio->reg_mem_cfg);
     device_destroy(aaudio_class, aaudio->devt);
@@ -255,7 +255,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     }
 
     if (sdev->is_pcm) {
-        //
+        aaudio_create_pcm(sdev);
     }
 
     aaudio_reply_free(&buf);

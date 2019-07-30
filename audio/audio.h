@@ -14,6 +14,7 @@
 #define AAUDIO_DEIVCE_MAX_BUFFER_COUNT 1
 
 struct snd_card;
+struct snd_pcm;
 struct snd_pcm_hardware;
 
 struct __attribute__((packed)) __attribute__((aligned(4))) aaudio_buffer_struct_buffer {
@@ -69,6 +70,7 @@ struct aaudio_subdevice {
     size_t out_stream_cnt;
     struct aaudio_stream out_streams[AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS];
     bool is_pcm;
+    struct snd_pcm *pcm;
 };
 
 struct aaudio_device {

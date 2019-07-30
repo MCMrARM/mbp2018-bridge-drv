@@ -96,3 +96,113 @@ int aaudio_create_hw_info(struct aaudio_apple_description *desc, struct snd_pcm_
             alsa_hw->formats, alsa_hw->rate_min, alsa_hw->rates, alsa_hw->periods_min, alsa_hw->period_bytes_min);
     return 0;
 }
+
+static struct aaudio_stream *aaudio_pcm_stream(struct snd_pcm_substream *substream)
+{
+    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
+    if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+        return &sdev->out_streams[substream->number];
+    else
+        return &sdev->in_streams[substream->number];
+}
+
+static int aaudio_pcm_open(struct snd_pcm_substream *substream)
+{
+    pr_info("aaudio_pcm_open\n");
+
+    substream->runtime->hw = *aaudio_pcm_stream(substream)->alsa_hw_desc;
+    return 0;
+}
+
+static int aaudio_pcm_close(struct snd_pcm_substream *substream)
+{
+    pr_info("aaudio_pcm_close\n");
+
+    return 0;
+}
+
+static int aaudio_pcm_prepare(struct snd_pcm_substream *substream)
+{
+    return 0;
+}
+
+static int aaudio_pcm_hw_params(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *hw_params)
+{
+    struct aaudio_stream *astream = aaudio_pcm_stream(substream);
+    pr_info("aaudio_pcm_hw_params\n");
+
+    if (!astream->buffer_cnt || !astream->buffers)
+        return -EINVAL;
+
+    substream->runtime->dma_area = astream->buffers[0].ptr;
+    substream->runtime->dma_addr = astream->buffers[0].dma_addr;
+    substream->runtime->dma_bytes = astream->buffers[0].size;
+    return 0;
+}
+
+static int aaudio_pcm_hw_free(struct snd_pcm_substream *substream)
+{
+    pr_info("aaudio_pcm_hw_free\n");
+    return 0;
+}
+
+static int aaudio_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+{
+    struct aaudio_send_ctx sctx;
+    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
+    pr_info("aaudio_pcm_trigger %x\n", cmd);
+
+    /* We only supports triggers on the #0 buffer */
+    if (substream->number != 0)
+        return 0;
+    switch (cmd) {
+        case SNDRV_PCM_TRIGGER_START:
+            aaudio_send(sdev->a, &sctx, 0,
+                        aaudio_msg_write_start_io, sdev->dev_id);
+            break;
+        case SNDRV_PCM_TRIGGER_STOP:
+            aaudio_send(sdev->a, &sctx, 0,
+                        aaudio_msg_write_stop_io, sdev->dev_id);
+            break;
+        default:
+            return -EINVAL;
+    }
+    return 0;
+}
+
+static snd_pcm_uframes_t aaudio_pcm_pointer(struct snd_pcm_substream *substream)
+{
+    return 0;
+}
+
+static struct snd_pcm_ops aaudio_pcm_playback_ops = {
+        .open =        aaudio_pcm_open,
+        .close =       aaudio_pcm_close,
+        .ioctl =       snd_pcm_lib_ioctl,
+        .hw_params =   aaudio_pcm_hw_params,
+        .hw_free =     aaudio_pcm_hw_free,
+        .prepare =     aaudio_pcm_prepare,
+        .trigger =     aaudio_pcm_trigger,
+        .pointer =     aaudio_pcm_pointer,
+        .mmap    =     snd_pcm_lib_mmap_iomem
+};
+
+int aaudio_create_pcm(struct aaudio_subdevice *sdev)
+{
+    struct snd_pcm *pcm;
+    int err;
+
+    if (!sdev->is_pcm || sdev->out_stream_cnt == 0) {
+        /* For now we only support output devices here */
+        return -EINVAL;
+    }
+
+    err = snd_pcm_new(sdev->a->card, sdev->uid, 0, (int) sdev->out_stream_cnt, (int) sdev->in_stream_cnt, &pcm);
+    if (err < 0)
+        return err;
+    pcm->private_data = sdev;
+    sdev->pcm = pcm;
+    strcpy(pcm->name, sdev->uid);
+    snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &aaudio_pcm_playback_ops);
+    return 0;
+}
