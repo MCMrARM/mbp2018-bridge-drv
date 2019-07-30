@@ -8,6 +8,7 @@
 #define AAUDIO_SIG 0x19870423
 
 #define AAUDIO_DEVICE_MAX_UID_LEN 128
+#define AAUDIO_DEIVCE_MAX_INPUT_BUFFERS 1
 
 struct snd_card;
 
@@ -37,7 +38,9 @@ struct aaudio_buffer_struct {
     struct aaudio_buffer_struct_device devices[20];
 };
 
+struct aaudio_device;
 struct aaudio_subdevice {
+    struct aaudio_device *a;
     struct list_head list;
     aaudio_device_id_t dev_id;
     u8 buf_id;
