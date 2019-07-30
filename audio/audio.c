@@ -189,6 +189,11 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     struct aaudio_msg buf = aaudio_reply_alloc();
     char *uid;
     u64 uid_len;
+    /* TESTING: Disable devices other than Speaker */
+    if (dev_id != 0x3a) {
+        return;
+    }
+
     if (aaudio_cmd_get_property(a, &buf, dev_id, dev_id, AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_UID, 0),
             NULL, 0, (void **) &uid, &uid_len) || uid_len > AAUDIO_DEVICE_MAX_UID_LEN) {
         dev_err(a->dev, "Failed to get device uid for device %llx", dev_id);
