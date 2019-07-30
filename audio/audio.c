@@ -4,7 +4,9 @@
 #include <linux/random.h>
 #include <sound/core.h>
 #include <sound/initval.h>
+#include <sound/pcm.h>
 #include "audio.h"
+#include "pcm.h"
 
 static int aaudio_alsa_index = SNDRV_DEFAULT_IDX1;
 static char *aaudio_alsa_id = SNDRV_DEFAULT_STR1;
@@ -233,7 +235,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     for (i = 0; i < stream_cnt; i++) {
         sdev->in_streams[i].id = stream_list[i];
         sdev->in_streams[i].buffer_cnt = 0;
-        aaudio_query_stream_info(a, dev_id, &sdev->in_streams[i]);
+        aaudio_query_stream_info(sdev, &sdev->in_streams[i]);
     }
 
     if (aaudio_cmd_get_output_stream_list(a, &buf, dev_id, &stream_list, &stream_cnt)) {
@@ -249,7 +251,11 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     for (i = 0; i < stream_cnt; i++) {
         sdev->out_streams[i].id = stream_list[i];
         sdev->out_streams[i].buffer_cnt = 0;
-        aaudio_query_stream_info(a, dev_id, &sdev->out_streams[i]);
+        aaudio_query_stream_info(sdev, &sdev->out_streams[i]);
+    }
+
+    if (sdev->is_pcm) {
+        //
     }
 
     aaudio_reply_free(&buf);
@@ -269,16 +275,22 @@ static void aaudio_query_stream_info(struct aaudio_subdevice *sdev, struct aaudi
     if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, strm->id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_LATENCY, 0), NULL, 0, &strm->latency, sizeof(u32)))
         dev_warn(sdev->a->dev, "Failed to query stream latency\n");
+    if (strm->desc.format_id == AAUDIO_FORMAT_LPCM)
+        sdev->is_pcm = true;
 }
 
 static void aaudio_free_dev(struct aaudio_subdevice *sdev)
 {
     size_t i;
     for (i = 0; i < sdev->in_stream_cnt; i++) {
+        if (sdev->in_streams[i].alsa_hw_desc)
+            kfree(sdev->in_streams[i].alsa_hw_desc);
         if (sdev->in_streams[i].buffers)
             kfree(sdev->in_streams[i].buffers);
     }
     for (i = 0; i < sdev->out_stream_cnt; i++) {
+        if (sdev->out_streams[i].alsa_hw_desc)
+            kfree(sdev->out_streams[i].alsa_hw_desc);
         if (sdev->out_streams[i].buffers)
             kfree(sdev->out_streams[i].buffers);
     }
@@ -369,6 +381,14 @@ static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream 
         strm->buffers[i].dma_addr = a->reg_mem_bs_dma + (dma_addr_t) bs_strm->buffers[i].address;
         strm->buffers[i].ptr = a->reg_mem_bs + bs_strm->buffers[i].address;
         strm->buffers[i].size = bs_strm->buffers[i].size;
+    }
+
+    if (strm->buffer_cnt == 1) {
+        strm->alsa_hw_desc = kmalloc(sizeof(struct snd_pcm_hardware), GFP_KERNEL);
+        if (aaudio_create_hw_info(&strm->desc, strm->alsa_hw_desc, strm->buffers[0].size)) {
+            kfree(strm->alsa_hw_desc);
+            strm->alsa_hw_desc = NULL;
+        }
     }
 }
 

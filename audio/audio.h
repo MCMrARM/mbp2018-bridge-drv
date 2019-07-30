@@ -14,6 +14,7 @@
 #define AAUDIO_DEIVCE_MAX_BUFFER_COUNT 1
 
 struct snd_card;
+struct snd_pcm_hardware;
 
 struct __attribute__((packed)) __attribute__((aligned(4))) aaudio_buffer_struct_buffer {
     size_t address;
@@ -53,6 +54,7 @@ struct aaudio_stream {
     struct aaudio_dma_buf *buffers;
 
     struct aaudio_apple_description desc;
+    struct snd_pcm_hardware *alsa_hw_desc;
     u32 latency;
 };
 struct aaudio_subdevice {
@@ -66,6 +68,7 @@ struct aaudio_subdevice {
     struct aaudio_stream in_streams[AAUDIO_DEIVCE_MAX_INPUT_STREAMS];
     size_t out_stream_cnt;
     struct aaudio_stream out_streams[AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS];
+    bool is_pcm;
 };
 
 struct aaudio_device {
