@@ -4,6 +4,7 @@
 #include <linux/types.h>
 #include "../pci.h"
 #include "protocol_bce.h"
+#include "description.h"
 
 #define AAUDIO_SIG 0x19870423
 
@@ -51,6 +52,7 @@ struct aaudio_stream {
     size_t buffer_cnt;
     struct aaudio_dma_buf *buffers;
 
+    struct aaudio_apple_description desc;
     u32 latency;
 };
 struct aaudio_subdevice {

@@ -183,7 +183,7 @@ static int aaudio_init_cmd(struct aaudio_device *a)
     return 0;
 }
 
-static void aaudio_query_stream_info(struct aaudio_device *a, aaudio_device_id_t dev_id, struct aaudio_stream *strm);
+static void aaudio_query_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm);
 
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
 {
@@ -260,11 +260,15 @@ fail:
     kfree(sdev);
 }
 
-static void aaudio_query_stream_info(struct aaudio_device *a, aaudio_device_id_t dev_id, struct aaudio_stream *strm)
+static void aaudio_query_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm)
 {
-    if (aaudio_cmd_get_primitive_property(a, dev_id, strm->id,
+    if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, strm->id,
+            AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_PHYS_FORMAT, 0), NULL, 0,
+            &strm->desc, sizeof(strm->desc)))
+        dev_warn(sdev->a->dev, "Failed to query stream descriptor\n");
+    if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, strm->id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_LATENCY, 0), NULL, 0, &strm->latency, sizeof(u32)))
-        dev_warn(a->dev, "Failed to query stream latency\n");
+        dev_warn(sdev->a->dev, "Failed to query stream latency\n");
 }
 
 static void aaudio_free_dev(struct aaudio_subdevice *sdev)
