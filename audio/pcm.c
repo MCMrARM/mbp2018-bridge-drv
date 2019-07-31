@@ -227,7 +227,9 @@ int aaudio_create_pcm(struct aaudio_subdevice *sdev)
         return -EINVAL;
     }
 
-    err = snd_pcm_new(sdev->a->card, sdev->uid, 0, (int) sdev->out_stream_cnt, (int) sdev->in_stream_cnt, &pcm);
+    sdev->alsa_id = sdev->a->next_alsa_id++;
+    err = snd_pcm_new(sdev->a->card, sdev->uid, sdev->alsa_id,
+            (int) sdev->out_stream_cnt, (int) sdev->in_stream_cnt, &pcm);
     if (err < 0)
         return err;
     pcm->private_data = sdev;

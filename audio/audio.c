@@ -90,6 +90,8 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     strcpy(aaudio->card->driver, "Apple Audio");
     strcpy(aaudio->card->shortname, "Apple T2 Audio");
     strcpy(aaudio->card->longname, "Apple T2 Audio");
+    strcpy(aaudio->card->mixername, "Apple T2 Audio");
+    aaudio->next_alsa_id = 0;
 
     if (aaudio_init_cmd(aaudio)) {
         dev_err(&dev->dev, "aaudio: Failed to initialize over BCE\n");

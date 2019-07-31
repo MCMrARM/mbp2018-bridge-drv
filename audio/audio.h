@@ -70,6 +70,7 @@ struct aaudio_subdevice {
     aaudio_device_id_t dev_id;
     u32 in_latency, out_latency;
     u8 buf_id;
+    int alsa_id;
     char uid[AAUDIO_DEVICE_MAX_UID_LEN + 1];
     size_t in_stream_cnt;
     struct aaudio_stream in_streams[AAUDIO_DEIVCE_MAX_INPUT_STREAMS];
@@ -97,6 +98,7 @@ struct aaudio_device {
     struct snd_card *card;
 
     struct list_head subdevice_list;
+    int next_alsa_id;
 
     struct completion remote_alive;
 };
