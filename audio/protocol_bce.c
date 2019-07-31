@@ -79,8 +79,10 @@ int __aaudio_send_prepare(struct aaudio_bce *b, struct aaudio_send_ctx *ctx, cha
 void __aaudio_send(struct aaudio_bce *b, struct aaudio_send_ctx *ctx)
 {
     struct bce_qe_submission *s = bce_next_submission(b->qout.sq);
-    pr_info("aaudio: Sending command data\n");
-    print_hex_dump(KERN_INFO, "aaudio:OUT ", DUMP_PREFIX_NONE, 32, 1, ctx->msg.data, ctx->msg.size, true);
+#ifdef DEBUG
+    pr_debug("aaudio: Sending command data\n");
+    print_hex_dump(KERN_DEBUG, "aaudio:OUT ", DUMP_PREFIX_NONE, 32, 1, ctx->msg.data, ctx->msg.size, true);
+#endif
     bce_set_submission_single(s, b->qout.dma_addr + (dma_addr_t) (ctx->msg.data - b->qout.data), ctx->msg.size);
     bce_submit_to_device(b->qout.sq);
     b->qout.data_tail = (b->qout.data_tail + 1) % b->qout.el_count;
@@ -165,8 +167,10 @@ static void aaudio_bce_in_queue_completion(struct bce_queue_sq *sq)
     while ((c = bce_next_completion(sq))) {
         msg.data = (u8 *) q->data + q->data_head * q->el_size;
         msg.size = c->data_size;
-        pr_info("aaudio: Received command data %llx\n", c->data_size);
-        print_hex_dump(KERN_INFO, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, min(msg.size, 128UL), true);
+#ifdef DEBUG
+        pr_debug("aaudio: Received command data %llx\n", c->data_size);
+        print_hex_dump(KERN_DEBUG, "aaudio:IN ", DUMP_PREFIX_NONE, 32, 1, msg.data, min(msg.size, 128UL), true);
+#endif
         aaudio_bce_in_queue_handle_msg(dev, &msg);
 
         q->data_head = (q->data_head + 1) % q->el_count;
