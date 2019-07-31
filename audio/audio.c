@@ -127,6 +127,8 @@ fail:
     return status;
 }
 
+
+
 static void aaudio_remove(struct pci_dev *dev)
 {
     struct aaudio_subdevice *sdev;
@@ -185,7 +187,7 @@ static int aaudio_init_cmd(struct aaudio_device *a)
     return 0;
 }
 
-static void aaudio_query_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm);
+static void aaudio_init_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm);
 
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
 {
@@ -194,10 +196,6 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     u64 uid_len, stream_cnt, i;
     aaudio_object_id_t *stream_list;
     char *uid;
-    /* TESTING: Disable devices other than Speaker */
-    if (dev_id != 0x3a) {
-        return;
-    }
 
     sdev = kzalloc(sizeof(struct aaudio_subdevice), GFP_KERNEL);
 
@@ -213,7 +211,11 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     sdev->dev_id = dev_id;
     strncpy(sdev->uid, uid, uid_len);
     sdev->uid[uid_len + 1] = '\0';
-    list_add_tail(&sdev->list, &a->subdevice_list);
+
+    /* TESTING: Disable devices other than Speaker */
+    if (strcmp(sdev->uid, "Speaker") != 0) {
+        goto fail;
+    }
 
     if (aaudio_cmd_get_primitive_property(a, dev_id, dev_id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_INPUT, AAUDIO_PROP_LATENCY, 0), NULL, 0, &sdev->in_latency, sizeof(u32)))
@@ -235,7 +237,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     for (i = 0; i < stream_cnt; i++) {
         sdev->in_streams[i].id = stream_list[i];
         sdev->in_streams[i].buffer_cnt = 0;
-        aaudio_query_stream_info(sdev, &sdev->in_streams[i]);
+        aaudio_init_stream_info(sdev, &sdev->in_streams[i]);
     }
 
     if (aaudio_cmd_get_output_stream_list(a, &buf, dev_id, &stream_list, &stream_cnt)) {
@@ -251,7 +253,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     for (i = 0; i < stream_cnt; i++) {
         sdev->out_streams[i].id = stream_list[i];
         sdev->out_streams[i].buffer_cnt = 0;
-        aaudio_query_stream_info(sdev, &sdev->out_streams[i]);
+        aaudio_init_stream_info(sdev, &sdev->out_streams[i]);
     }
 
     if (sdev->is_pcm) {
@@ -259,6 +261,8 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     }
 
     aaudio_reply_free(&buf);
+
+    list_add_tail(&sdev->list, &a->subdevice_list);
     return;
 
 fail:
@@ -266,8 +270,10 @@ fail:
     kfree(sdev);
 }
 
-static void aaudio_query_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm)
+static void aaudio_init_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm)
 {
+    spin_lock_init(&strm->start_io_sl);
+    init_completion(&strm->start_io_compl);
     if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, strm->id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_PHYS_FORMAT, 0), NULL, 0,
             &strm->desc, sizeof(strm->desc)))
@@ -295,6 +301,16 @@ static void aaudio_free_dev(struct aaudio_subdevice *sdev)
             kfree(sdev->out_streams[i].buffers);
     }
     kfree(sdev);
+}
+
+static struct aaudio_subdevice *aaudio_find_dev_by_dev_id(struct aaudio_device *a, aaudio_device_id_t dev_id)
+{
+    struct aaudio_subdevice *sdev;
+    list_for_each_entry(sdev, &a->subdevice_list, list) {
+        if (dev_id == sdev->dev_id)
+            return sdev;
+    }
+    return NULL;
 }
 
 static struct aaudio_subdevice *aaudio_find_dev_by_uid(struct aaudio_device *a, const char *uid)
@@ -424,10 +440,15 @@ void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
 
 void aaudio_handle_cmd_timestamp(struct aaudio_device *a, struct aaudio_msg *msg)
 {
+    ktime_t time_os = ktime_get_boottime();
     struct aaudio_send_ctx sctx;
+    struct aaudio_subdevice *sdev;
     u64 devid, timestamp, update_seed;
     aaudio_msg_read_update_timestamp(msg, &devid, &timestamp, &update_seed);
     dev_info(a->dev, "Received timestamp update for dev=%llx ts=%llx seed=%llx\n", devid, timestamp, update_seed);
+
+    sdev = aaudio_find_dev_by_dev_id(a, devid);
+    aaudio_handle_timestamp(sdev, time_os, timestamp);
 
     aaudio_send_cmd_response(a, &sctx, msg,
             aaudio_msg_write_update_timestamp_response);

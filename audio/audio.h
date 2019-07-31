@@ -57,6 +57,12 @@ struct aaudio_stream {
     struct aaudio_apple_description desc;
     struct snd_pcm_hardware *alsa_hw_desc;
     u32 latency;
+
+    struct spinlock start_io_sl;
+    struct completion start_io_compl;
+    bool needs_start_io_compl;
+
+    ktime_t remote_timestamp;
 };
 struct aaudio_subdevice {
     struct aaudio_device *a;
