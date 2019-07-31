@@ -212,8 +212,8 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     strncpy(sdev->uid, uid, uid_len);
     sdev->uid[uid_len + 1] = '\0';
 
-    /* TESTING: Disable devices other than Speaker */
-    if (strcmp(sdev->uid, "Speaker") != 0) {
+    /* TESTING: Disable devices other than Speaker and Codec Output */
+    if (strcmp(sdev->uid, "Speaker") != 0 && strcmp(sdev->uid, "Codec Output") != 0) {
         goto fail;
     }
 
