@@ -207,6 +207,9 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
     bce_vhci_device_t devid;
     pr_info("bce_vhci_enable_device\n");
 
+    if (vhci->port_to_device[udev->portnum])
+        return 0;
+
     /* We need to early address the device */
     if (bce_vhci_cmd_device_create(&vhci->cq, udev->portnum, &devid))
         return -EIO;
