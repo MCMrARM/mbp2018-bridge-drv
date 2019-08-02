@@ -486,7 +486,7 @@ static int bce_vhci_urb_control_check_status(struct bce_vhci_urb *urb)
             urb->q->stalled = true;
             bce_vhci_urb_complete(urb, -EPIPE);
             if (!list_empty(&q->endp->urb_list))
-                bce_vhci_transfer_queue_request_reset(urb->q);
+                bce_vhci_transfer_queue_request_reset(q);
             return -ENOENT;
         }
         bce_vhci_urb_complete(urb, 0);
