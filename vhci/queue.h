@@ -43,15 +43,14 @@ struct bce_vhci_event_queue {
     bce_vhci_event_queue_callback cb;
 };
 struct bce_vhci_command_queue_completion {
-    struct list_head list_head;
-    bool deleted;
     struct bce_vhci_message *result;
     struct completion completion;
 };
 struct bce_vhci_command_queue {
     struct bce_vhci_message_queue *mq;
-    struct list_head completion_list;
-    struct spinlock completion_list_lock;
+    struct bce_vhci_command_queue_completion completion;
+    struct spinlock completion_lock;
+    struct mutex mutex;
 };
 
 int bce_vhci_message_queue_create(struct bce_vhci *vhci, struct bce_vhci_message_queue *ret, const char *name);

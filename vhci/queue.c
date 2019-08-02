@@ -141,68 +141,67 @@ void bce_vhci_event_queue_submit_pending(struct bce_vhci_event_queue *q, size_t 
 void bce_vhci_command_queue_create(struct bce_vhci_command_queue *ret, struct bce_vhci_message_queue *mq)
 {
     ret->mq = mq;
-    INIT_LIST_HEAD(&ret->completion_list);
-    spin_lock_init(&ret->completion_list_lock);
+    ret->completion.result = NULL;
+    init_completion(&ret->completion.completion);
+    spin_lock_init(&ret->completion_lock);
+    mutex_init(&ret->mutex);
 }
 
 void bce_vhci_command_queue_destroy(struct bce_vhci_command_queue *cq)
 {
-    struct bce_vhci_message abort_msg;
-    memset(&abort_msg, 0, sizeof(abort_msg));
-    abort_msg.status = BCE_VHCI_ABORT;
-    while (!list_empty(&cq->completion_list))
-        bce_vhci_command_queue_deliver_completion(cq, &abort_msg);
+    spin_lock(&cq->completion_lock);
+    if (cq->completion.result) {
+        memset(cq->completion.result, 0, sizeof(struct bce_vhci_message));
+        cq->completion.result->status = BCE_VHCI_ABORT;
+        complete(&cq->completion.completion);
+        cq->completion.result = NULL;
+    }
+    spin_unlock(&cq->completion_lock);
+    mutex_lock(&cq->mutex);
+    mutex_unlock(&cq->mutex);
+    mutex_destroy(&cq->mutex);
 }
 
 void bce_vhci_command_queue_deliver_completion(struct bce_vhci_command_queue *cq, struct bce_vhci_message *msg)
 {
-    struct bce_vhci_command_queue_completion *c;
+    struct bce_vhci_command_queue_completion *c = &cq->completion;
 
-    spin_lock(&cq->completion_list_lock);
-    if (list_empty(&cq->completion_list)) {
-        pr_err("bce-vhci: Unexpected command queue completion delivery\n");
-        spin_unlock(&cq->completion_list_lock);
-        return;
+    spin_lock(&cq->completion_lock);
+    if (c->result) {
+        *c->result = *msg;
+        complete(&c->completion);
+        c->result = NULL;
     }
-    c = list_first_entry(&cq->completion_list, struct bce_vhci_command_queue_completion, list_head);
-    c->deleted = true;
-    list_del(&c->list_head);
-    spin_unlock(&cq->completion_list_lock);
-
-    *c->result = *msg;
-    mb();
-    complete(&c->completion);
+    spin_unlock(&cq->completion_lock);
 }
 
 static int bce_vhci_command_queue_cancel(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
         struct bce_vhci_message *res);
 
-int bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
+int __bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
         struct bce_vhci_message *res, unsigned long timeout)
 {
     int status;
-    struct bce_vhci_command_queue_completion c;
-    INIT_LIST_HEAD(&c.list_head);
-    c.result = res;
-    c.deleted = false;
-    init_completion(&c.completion);
+    struct bce_vhci_command_queue_completion *c;
+    c = &cq->completion;
 
     if ((status = bce_reserve_submission(cq->mq->sq, &timeout)))
         return status;
 
-    spin_lock(&cq->completion_list_lock);
-    list_add_tail(&c.list_head, &cq->completion_list);
+    spin_lock(&cq->completion_lock);
+    c->result = res;
+    reinit_completion(&c->completion);
+    spin_unlock(&cq->completion_lock);
+
     bce_vhci_message_queue_write(cq->mq, req);
-    spin_unlock(&cq->completion_list_lock);
 
-    if (!wait_for_completion_timeout(&c.completion, timeout)) {
-        /* we ran out of time, delete the request if needed */
-        spin_lock(&cq->completion_list_lock);
-        if (!c.deleted)
-            list_del(&c.list_head);
-        spin_unlock(&cq->completion_list_lock);
+    if (!wait_for_completion_timeout(&c->completion, timeout)) {
+        /* we ran out of time, clean up info */
+        spin_lock(&cq->completion_lock);
+        c->result = NULL;
+        spin_unlock(&cq->completion_lock);
 
-        if (!(req->status & 0x4000))
+        if (!(req->cmd & 0x4000))
             return bce_vhci_command_queue_cancel(cq, req, res);
 
         return -ETIMEDOUT;
@@ -224,7 +223,7 @@ static int bce_vhci_command_queue_cancel(struct bce_vhci_command_queue *cq, stru
     struct bce_vhci_message creq;
     creq = *req;
     creq.cmd |= 0x4000;
-    status = bce_vhci_command_queue_execute(cq, &creq, res, 1000);
+    status = __bce_vhci_command_queue_execute(cq, &creq, res, 1000);
     if (status == -ETIMEDOUT) {
         pr_err("bce-vhci: Possible desync, cancel timeout\n");
         return -ETIMEDOUT;
@@ -232,4 +231,14 @@ static int bce_vhci_command_queue_cancel(struct bce_vhci_command_queue *cq, stru
     if (!(res->cmd & 0x4000)) /* The abort did not get through probably */
         return status;
     return -ETIMEDOUT;
+}
+
+int bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
+                                   struct bce_vhci_message *res, unsigned long timeout)
+{
+    int status;
+    mutex_lock(&cq->mutex);
+    status = __bce_vhci_command_queue_execute(cq, req, res, timeout);
+    mutex_unlock(&cq->mutex);
+    return status;
 }
