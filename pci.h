@@ -27,6 +27,10 @@ struct bce_device {
     struct bce_queue_sq *int_sq_list[BCE_MAX_QUEUE_COUNT];
     bool is_being_removed;
 
+    dma_addr_t saved_data_dma_addr;
+    void *saved_data_dma_ptr;
+    size_t saved_data_dma_size;
+
     struct bce_vhci vhci;
 };
 

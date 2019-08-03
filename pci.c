@@ -232,6 +232,72 @@ static void bce_remove(struct pci_dev *dev)
     kfree(bce);
 }
 
+static int bce_save_state_and_sleep(struct bce_device *bce)
+{
+    int attempt, status = 0;
+    u64 resp;
+    dma_addr_t dma_addr;
+    void *dma_ptr = NULL;
+    size_t size = max(PAGE_SIZE, 4096UL);
+
+    for (attempt = 0; attempt < 5; ++attempt) {
+        pr_debug("bce: suspend: attempt %i, buffer size %li\n", attempt, size);
+        dma_ptr = dma_alloc_coherent(&bce->pci->dev, size, &dma_addr, GFP_KERNEL);
+        if (!dma_ptr) {
+            pr_err("bce: suspend failed (data alloc failed)\n");
+            break;
+        }
+        BUG_ON((dma_addr % 4096) != 0);
+        status = bce_mailbox_send(&bce->mbox,
+                BCE_MB_MSG(BCE_MB_SAVE_STATE_AND_SLEEP, (dma_addr & ~(4096 - 1)) | (size / 4096)), &resp);
+        if (status) {
+            pr_err("bce: suspend failed (mailbox send)\n");
+            break;
+        }
+        if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_STATE_AND_SLEEP_COMPLETE) {
+            bce->saved_data_dma_addr = dma_addr;
+            bce->saved_data_dma_ptr = dma_ptr;
+            bce->saved_data_dma_size = size;
+            return 0;
+        } else if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_STATE_AND_SLEEP_FAILURE) {
+            dma_free_coherent(&bce->pci->dev, size, dma_ptr, dma_addr);
+            /* The 0x10ff magic value was extracted from Apple's driver */
+            size = (BCE_MB_VALUE(resp) + 0x10ff) & ~(4096 - 1);
+            pr_debug("bce: suspend: device requested a larger buffer (%li)\n", size);
+            continue;
+        } else {
+            pr_err("bce: suspend failed (invalid device response)\n");
+            status = -EINVAL;
+            break;
+        }
+    }
+    if (dma_ptr)
+        dma_free_coherent(&bce->pci->dev, size, dma_ptr, dma_addr);
+    if (!status)
+        return bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_SLEEP_NO_STATE, 0), &resp);
+    return status;
+}
+
+static int bce_suspend(struct pci_dev *dev, pm_message_t state)
+{
+    struct bce_device *bce = pci_get_drvdata(dev);
+    int status;
+
+    if ((status = bce_save_state_and_sleep(bce)))
+        return status;
+
+    pci_disable_device(dev);
+    pci_save_state(dev);
+    pci_set_power_state(dev, pci_choose_state(dev, state));
+    return 0;
+}
+
+static int bce_resume(struct pci_dev *dev)
+{
+    struct bce_device *bce = pci_get_drvdata(dev);
+
+}
+
 static struct pci_device_id bce_ids[  ] = {
         { PCI_DEVICE(PCI_VENDOR_ID_APPLE, 0x1801) },
         { 0, },
@@ -241,7 +307,9 @@ struct pci_driver bce_pci_driver = {
         .name = "bce",
         .id_table = bce_ids,
         .probe = bce_probe,
-        .remove = bce_remove
+        .remove = bce_remove,
+        .suspend = bce_suspend,
+        .resume = bce_resume
 };
 
 
