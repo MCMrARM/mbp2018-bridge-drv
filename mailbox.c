@@ -88,20 +88,32 @@ void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg)
     ioread32(regb);
     mb();
 
-    iowrite32((u32) -4, regb + 2);
-    iowrite32((u32) -1, regb);
-
     timer_setup(&ts->timer, bc_send_timestamp, 0);
 }
 
-void bce_timestamp_start(struct bce_timestamp *ts)
+void bce_timestamp_start(struct bce_timestamp *ts, bool is_initial)
 {
+    u32 __iomem *regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+
+    if (is_initial) {
+        iowrite32((u32) -4, regb + 2);
+        iowrite32((u32) -1, regb);
+    } else {
+        iowrite32((u32) -3, regb + 2);
+        iowrite32((u32) -1, regb);
+    }
+
     mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
 }
 
 void bce_timestamp_stop(struct bce_timestamp *ts)
 {
+    u32 __iomem *regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+
     del_timer_sync(&ts->timer);
+
+    iowrite32((u32) -2, regb + 2);
+    iowrite32((u32) -1, regb);
 }
 
 static void bc_send_timestamp(struct timer_list *tl)

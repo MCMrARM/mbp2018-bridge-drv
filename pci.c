@@ -14,6 +14,8 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
 static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_memcfg *cfg, int is_sq);
 
+static int bce_suspend(struct pci_dev *dev, pm_message_t state);
+
 static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
     struct bce_device *bce = NULL;
@@ -73,7 +75,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
     }
 
-    bce_timestamp_start(&bce->timestamp);
+    bce_timestamp_start(&bce->timestamp, true);
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail_ts;
@@ -86,7 +88,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     global_bce = bce;
 
-    bce_vhci_create(bce, &bce->vhci);
+    //bce_vhci_create(bce, &bce->vhci);
 
     return 0;
 
@@ -217,7 +219,7 @@ static void bce_remove(struct pci_dev *dev)
     struct bce_device *bce = pci_get_drvdata(dev);
     bce->is_being_removed = true;
 
-    bce_vhci_destroy(&bce->vhci);
+    //bce_vhci_destroy(&bce->vhci);
 
     bce_timestamp_stop(&bce->timestamp);
     pci_free_irq(dev, 0, dev);
@@ -254,7 +256,7 @@ static int bce_save_state_and_sleep(struct bce_device *bce)
             pr_err("bce: suspend failed (mailbox send)\n");
             break;
         }
-        if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_STATE_AND_SLEEP_COMPLETE) {
+        if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_RESTORE_STATE_COMPLETE) {
             bce->saved_data_dma_addr = dma_addr;
             bce->saved_data_dma_ptr = dma_ptr;
             bce->saved_data_dma_size = size;
@@ -278,10 +280,45 @@ static int bce_save_state_and_sleep(struct bce_device *bce)
     return status;
 }
 
+static int bce_restore_state_and_wake(struct bce_device *bce)
+{
+    int status;
+    u64 resp;
+    if (!bce->saved_data_dma_ptr) {
+        if ((status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_RESTORE_NO_STATE, 0), &resp))) {
+            pr_err("bce: resume with no state failed (mailbox send)\n");
+            return status;
+        }
+        if (BCE_MB_TYPE(resp) != BCE_MB_RESTORE_NO_STATE) {
+            pr_err("bce: resume with no state failed (invalid device response)\n");
+            return -EINVAL;
+        }
+        return 0;
+    }
+
+    if ((status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_RESTORE_STATE_AND_WAKE,
+            (bce->saved_data_dma_addr & ~(4096 - 1)) | (bce->saved_data_dma_size / 4096)), &resp))) {
+        pr_err("bce: resume with state failed (mailbox send)\n");
+        goto finish_with_state;
+    }
+    if (BCE_MB_TYPE(resp) != BCE_MB_SAVE_RESTORE_STATE_COMPLETE) {
+        pr_err("bce: resume with state failed (invalid device response)\n");
+        status = -EINVAL;
+        goto finish_with_state;
+    }
+
+finish_with_state:
+    dma_free_coherent(&bce->pci->dev, bce->saved_data_dma_size, bce->saved_data_dma_ptr, bce->saved_data_dma_addr);
+    bce->saved_data_dma_ptr = NULL;
+    return status;
+}
+
 static int bce_suspend(struct pci_dev *dev, pm_message_t state)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
     int status;
+
+    bce_timestamp_stop(&bce->timestamp);
 
     if ((status = bce_save_state_and_sleep(bce)))
         return status;
@@ -295,7 +332,19 @@ static int bce_suspend(struct pci_dev *dev, pm_message_t state)
 static int bce_resume(struct pci_dev *dev)
 {
     struct bce_device *bce = pci_get_drvdata(dev);
+    int status;
 
+    pci_set_power_state(dev, PCI_D0);
+    pci_restore_state(dev);
+    if ((status = pci_enable_device(dev)))
+        return status;
+
+    if ((status = bce_restore_state_and_wake(bce)))
+        return status;
+
+    bce_timestamp_start(&bce->timestamp, false);
+
+    return 0;
 }
 
 static struct pci_device_id bce_ids[  ] = {
@@ -332,7 +381,7 @@ static int __init bce_module_init(void)
     if (result)
         goto fail_drv;
 
-    aaudio_module_init();
+    //aaudio_module_init();
 
     return 0;
 
@@ -348,7 +397,7 @@ fail_chrdev:
 }
 static void __exit bce_module_exit(void)
 {
-    aaudio_module_exit();
+    //aaudio_module_exit();
     bce_vhci_module_exit();
     pci_unregister_driver(&bce_pci_driver);
     class_destroy(bce_class);
