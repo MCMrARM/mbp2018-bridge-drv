@@ -87,7 +87,7 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
         dev_err(&dev->dev, "aaudio: Failed to create ALSA card\n");
         goto fail;
     }
-    strcpy(aaudio->card->driver, "Apple Audio");
+    strcpy(aaudio->card->driver, "AppleT2");
     strcpy(aaudio->card->shortname, "Apple T2 Audio");
     strcpy(aaudio->card->longname, "Apple T2 Audio");
     strcpy(aaudio->card->mixername, "Apple T2 Audio");
@@ -274,8 +274,6 @@ fail:
 
 static void aaudio_init_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm)
 {
-    spin_lock_init(&strm->start_io_sl);
-    init_completion(&strm->start_io_compl);
     if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, strm->id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_GLOBAL, AAUDIO_PROP_PHYS_FORMAT, 0), NULL, 0,
             &strm->desc, sizeof(strm->desc)))

@@ -109,38 +109,15 @@ static struct aaudio_stream *aaudio_pcm_stream(struct snd_pcm_substream *substre
 
 static int aaudio_pcm_open(struct snd_pcm_substream *substream)
 {
-    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
-    struct aaudio_stream *stream = aaudio_pcm_stream(substream);
-    ktime_t time_start, time_end;
     pr_info("aaudio_pcm_open\n");
-
     substream->runtime->hw = *aaudio_pcm_stream(substream)->alsa_hw_desc;
 
-    /* I'm very well aware this is not the correct place but because the start io command clears the buffer, for now
-     * the stream start has to be here... */
-    time_start = ktime_get();
-
-    spin_lock(&sdev->out_streams[0].start_io_sl);
-    reinit_completion(&stream->start_io_compl);
-    stream->needs_start_io_compl = true;
-    spin_unlock(&sdev->out_streams[0].start_io_sl);
-
-    aaudio_cmd_start_io(sdev->a, sdev->dev_id);
-    wait_for_completion_timeout(&stream->start_io_compl, 500);
-
-    stream->remote_timestamp = (u64) ktime_get_boottime();
-
-    time_end = ktime_get();
-    pr_info("aaudio: Started the audio device in %lluns\n", ktime_to_ns(time_end - time_start));
     return 0;
 }
 
 static int aaudio_pcm_close(struct snd_pcm_substream *substream)
 {
-    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
     pr_info("aaudio_pcm_close\n");
-
-    aaudio_cmd_stop_io(sdev->a, sdev->dev_id);
     return 0;
 }
 
@@ -169,8 +146,34 @@ static int aaudio_pcm_hw_free(struct snd_pcm_substream *substream)
     return 0;
 }
 
+static void aaudio_pcm_start(struct snd_pcm_substream *substream)
+{
+    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
+    struct aaudio_stream *stream = aaudio_pcm_stream(substream);
+    void *buf;
+    ktime_t time_start, time_end;
+    time_start = ktime_get();
+
+    size_t s = frames_to_bytes(substream->runtime, substream->runtime->control->appl_ptr);
+    buf = kmalloc(s, GFP_KERNEL);
+    memcpy_fromio(buf, substream->runtime->dma_area, s);
+    time_end = ktime_get();
+    pr_info("aaudio: Backed up the buffer in %lluns [%li]\n", ktime_to_ns(time_end - time_start),
+            substream->runtime->control->appl_ptr);
+
+    stream->waiting_for_first_ts = true;
+
+    aaudio_cmd_start_io(sdev->a, sdev->dev_id);
+    memcpy_toio(substream->runtime->dma_area, buf, s);
+
+    time_end = ktime_get();
+    pr_info("aaudio: Started the audio device in %lluns\n", ktime_to_ns(time_end - time_start));
+}
+
 static int aaudio_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
+    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
+    struct aaudio_stream *stream = aaudio_pcm_stream(substream);
     pr_info("aaudio_pcm_trigger %x\n", cmd);
 
     /* We only supports triggers on the #0 buffer */
@@ -178,8 +181,12 @@ static int aaudio_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
         return 0;
     switch (cmd) {
         case SNDRV_PCM_TRIGGER_START:
+            aaudio_pcm_start(substream);
+            stream->started = 1;
             break;
         case SNDRV_PCM_TRIGGER_STOP:
+            aaudio_cmd_stop_io(sdev->a, sdev->dev_id);
+            stream->started = 0;
             break;
         default:
             return -EINVAL;
@@ -189,17 +196,21 @@ static int aaudio_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 
 static snd_pcm_uframes_t aaudio_pcm_pointer(struct snd_pcm_substream *substream)
 {
-    struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
     struct aaudio_stream *stream = aaudio_pcm_stream(substream);
     ktime_t time_from_start;
     snd_pcm_sframes_t frames;
     snd_pcm_sframes_t buffer_time_length;
 
+    if (!stream->started || stream->waiting_for_first_ts) {
+        pr_warn("aaudio_pcm_pointer while not started\n");
+        return 0;
+    }
+
     /* Approximate the pointer based on the last received timestamp */
     time_from_start = ktime_get_boottime() - stream->remote_timestamp;
     buffer_time_length = NSEC_PER_SEC * substream->runtime->buffer_size / substream->runtime->rate;
     frames = (ktime_to_ns(time_from_start) % buffer_time_length) * substream->runtime->buffer_size / buffer_time_length;
-    frames -= stream->latency + sdev->out_latency;
+    //frames -= stream->latency + sdev->out_latency;
     if (frames < 0)
         frames += ((-frames - 1) / buffer_time_length + 1) * buffer_time_length;
     return (snd_pcm_uframes_t) frames;
@@ -250,19 +261,13 @@ void aaudio_handle_timestamp(struct aaudio_subdevice *sdev, ktime_t os_timestamp
     if (!substream)
         return;
     stream = aaudio_pcm_stream(substream);
-    spin_lock_irqsave(&stream->start_io_sl, flags);
-    if (stream->needs_start_io_compl) {
-        complete(&stream->start_io_compl);
-        stream->needs_start_io_compl = false;
-        spin_unlock(&stream->start_io_sl);
+    snd_pcm_stream_lock_irqsave(substream, flags);
+    stream->remote_timestamp = dev_timestamp;
+    if (stream->waiting_for_first_ts) {
+        stream->waiting_for_first_ts = false;
+        snd_pcm_stream_unlock_irqrestore(substream, flags);
         return;
     }
-    spin_unlock_irqrestore(&stream->start_io_sl, flags);
-
-    snd_pcm_stream_lock_irqsave(substream, flags);
-    /* TODO: I'm using the OS timestamp here, as the device is -0.5ms behind; while the device ts is probably more
-     * correct to use it causes audio glitches. Investigate it more? */
-    stream->remote_timestamp = os_timestamp;
     snd_pcm_stream_unlock_irqrestore(substream, flags);
     snd_pcm_period_elapsed(substream);
 }
