@@ -1,6 +1,5 @@
 #include "pcm.h"
 #include "audio.h"
-#include <sound/pcm.h>
 
 static u64 aaudio_get_alsa_fmtbit(struct aaudio_apple_description *desc)
 {
@@ -162,6 +161,7 @@ static void aaudio_pcm_start(struct snd_pcm_substream *substream)
             substream->runtime->control->appl_ptr);
 
     stream->waiting_for_first_ts = true;
+    stream->frame_min = 0;
 
     aaudio_cmd_start_io(sdev->a, sdev->dev_id);
     memcpy_toio(substream->runtime->dma_area, buf, s);
@@ -210,6 +210,17 @@ static snd_pcm_uframes_t aaudio_pcm_pointer(struct snd_pcm_substream *substream)
     time_from_start = ktime_get_boottime() - stream->remote_timestamp;
     buffer_time_length = NSEC_PER_SEC * substream->runtime->buffer_size / substream->runtime->rate;
     frames = (ktime_to_ns(time_from_start) % buffer_time_length) * substream->runtime->buffer_size / buffer_time_length;
+    if (ktime_to_ns(time_from_start) < buffer_time_length) {
+        if (frames < stream->frame_min)
+            frames = stream->frame_min;
+        else
+            stream->frame_min = 0;
+    } else {
+        if (ktime_to_ns(time_from_start) < 2 * buffer_time_length)
+            stream->frame_min = frames;
+        else
+            stream->frame_min = 0; /* Heavy desync */
+    }
     //frames -= stream->latency + sdev->out_latency;
     if (frames < 0)
         frames += ((-frames - 1) / buffer_time_length + 1) * buffer_time_length;

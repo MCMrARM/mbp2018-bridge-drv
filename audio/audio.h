@@ -2,6 +2,7 @@
 #define AAUDIO_H
 
 #include <linux/types.h>
+#include <sound/pcm.h>
 #include "../pci.h"
 #include "protocol_bce.h"
 #include "description.h"
@@ -61,6 +62,7 @@ struct aaudio_stream {
     bool waiting_for_first_ts;
 
     ktime_t remote_timestamp;
+    snd_pcm_sframes_t frame_min;
     int started;
 };
 struct aaudio_subdevice {
