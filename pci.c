@@ -15,8 +15,6 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev);
 static int bce_fw_version_handshake(struct bce_device *bce);
 static int bce_register_command_queue(struct bce_device *bce, struct bce_queue_memcfg *cfg, int is_sq);
 
-static int bce_suspend(struct pci_dev *dev, pm_message_t state);
-
 static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
     struct bce_device *bce = NULL;
@@ -31,6 +29,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         status = -ENODEV;
         goto fail;
     }
+    pci_set_master(dev);
     nvec = pci_alloc_irq_vectors(dev, 1, 8, PCI_IRQ_MSI);
     if (nvec < 5) {
         status = -EINVAL;
@@ -314,9 +313,9 @@ finish_with_state:
     return status;
 }
 
-static int bce_suspend(struct pci_dev *dev, pm_message_t state)
+static int bce_suspend(struct device *dev)
 {
-    struct bce_device *bce = pci_get_drvdata(dev);
+    struct bce_device *bce = pci_get_drvdata(to_pci_dev(dev));
     int status;
 
     bce_timestamp_stop(&bce->timestamp);
@@ -324,20 +323,16 @@ static int bce_suspend(struct pci_dev *dev, pm_message_t state)
     if ((status = bce_save_state_and_sleep(bce)))
         return status;
 
-    pci_disable_device(dev);
-    pci_save_state(dev);
-    pci_set_power_state(dev, pci_choose_state(dev, state));
+    pci_disable_device(bce->pci);
     return 0;
 }
 
-static int bce_resume(struct pci_dev *dev)
+static int bce_resume(struct device *dev)
 {
-    struct bce_device *bce = pci_get_drvdata(dev);
+    struct bce_device *bce = pci_get_drvdata(to_pci_dev(dev));
     int status;
 
-    pci_set_power_state(dev, PCI_D0);
-    pci_restore_state(dev);
-    if ((status = pci_enable_device(dev)))
+    if ((status = pci_enable_device(bce->pci)))
         return status;
 
     if ((status = bce_restore_state_and_wake(bce)))
@@ -353,13 +348,18 @@ static struct pci_device_id bce_ids[  ] = {
         { 0, },
 };
 
+struct dev_pm_ops bce_pci_driver_pm = {
+        .suspend = bce_suspend,
+        .resume = bce_resume
+};
 struct pci_driver bce_pci_driver = {
         .name = "bce",
         .id_table = bce_ids,
         .probe = bce_probe,
         .remove = bce_remove,
-        .suspend = bce_suspend,
-        .resume = bce_resume
+        .driver = {
+                .pm = &bce_pci_driver_pm
+        }
 };
 
 
