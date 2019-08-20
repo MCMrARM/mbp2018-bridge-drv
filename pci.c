@@ -1,5 +1,6 @@
 #include "pci.h"
 #include <linux/module.h>
+#include <linux/crc32.h>
 #include "audio/audio.h"
 
 static dev_t bce_chrdev;
@@ -251,7 +252,7 @@ static int bce_save_state_and_sleep(struct bce_device *bce)
         }
         BUG_ON((dma_addr % 4096) != 0);
         status = bce_mailbox_send(&bce->mbox,
-                BCE_MB_MSG(BCE_MB_SAVE_STATE_AND_SLEEP, (dma_addr & ~(4096 - 1)) | (size / 4096)), &resp);
+                BCE_MB_MSG(BCE_MB_SAVE_STATE_AND_SLEEP, (dma_addr & ~(4096LLU - 1)) | (size / 4096)), &resp);
         if (status) {
             pr_err("bce: suspend failed (mailbox send)\n");
             break;
@@ -264,7 +265,7 @@ static int bce_save_state_and_sleep(struct bce_device *bce)
         } else if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_STATE_AND_SLEEP_FAILURE) {
             dma_free_coherent(&bce->pci->dev, size, dma_ptr, dma_addr);
             /* The 0x10ff magic value was extracted from Apple's driver */
-            size = (BCE_MB_VALUE(resp) + 0x10ff) & ~(4096 - 1);
+            size = (BCE_MB_VALUE(resp) + 0x10ff) & ~(4096LLU - 1);
             pr_debug("bce: suspend: device requested a larger buffer (%li)\n", size);
             continue;
         } else {
@@ -297,7 +298,7 @@ static int bce_restore_state_and_wake(struct bce_device *bce)
     }
 
     if ((status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_RESTORE_STATE_AND_WAKE,
-            (bce->saved_data_dma_addr & ~(4096 - 1)) | (bce->saved_data_dma_size / 4096)), &resp))) {
+            (bce->saved_data_dma_addr & ~(4096LLU - 1)) | (bce->saved_data_dma_size / 4096)), &resp))) {
         pr_err("bce: resume with state failed (mailbox send)\n");
         goto finish_with_state;
     }
