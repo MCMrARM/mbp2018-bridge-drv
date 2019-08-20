@@ -145,7 +145,7 @@ static void bc_send_timestamp(struct timer_list *tl)
 
     spin_lock(&ts->stop_sl);
     if (!ts->stopped)
-        mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150))
+        mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
     spin_unlock(&ts->stop_sl);
     local_irq_restore(flags);
 }
