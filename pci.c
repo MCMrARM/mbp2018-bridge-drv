@@ -334,6 +334,14 @@ static int bce_resume(struct device *dev)
 
     if ((status = pci_enable_device(bce->pci)))
         return status;
+    pci_set_master(bce->pci);
+
+    /**
+     * NOTE: I have no idea why this msleep() is required. If the sleep is not done, the device is unable to read host
+     * DMA memory and the suspend fails (device panics). Note that non-DMA mailbox messages do work, only the DMA ones
+     * fail.
+     */
+    msleep(1);
 
     if ((status = bce_restore_state_and_wake(bce)))
         return status;
