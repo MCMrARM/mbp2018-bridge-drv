@@ -69,6 +69,8 @@ fail_dev:
 
 void bce_vhci_destroy(struct bce_vhci *vhci)
 {
+    dev_info(vhci->vdev, "test msg\n");
+    dev_info(vhci->hcd->self.controller, "test msg\n");
     usb_remove_hcd(vhci->hcd);
     bce_vhci_destroy_event_queues(vhci);
     bce_vhci_destroy_message_queues(vhci);
@@ -99,6 +101,12 @@ int bce_vhci_start(struct usb_hcd *hcd)
     }
     vhci->port_count = port_no;
     return 0;
+}
+
+void bce_vhci_stop(struct usb_hcd *hcd)
+{
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    bce_vhci_cmd_controller_disable(&vhci->cq);
 }
 
 static int bce_vhci_hub_status_data(struct usb_hcd *hcd, char *buf)
@@ -588,6 +596,7 @@ static const struct hc_driver bce_vhci_driver = {
         .flags = HCD_USB2,
 
         .start = bce_vhci_start,
+        .stop = bce_vhci_stop,
         .hub_status_data = bce_vhci_hub_status_data,
         .hub_control = bce_vhci_hub_control,
         .urb_enqueue = bce_vhci_urb_enqueue,

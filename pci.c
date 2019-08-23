@@ -406,9 +406,10 @@ fail_chrdev:
 }
 static void __exit bce_module_exit(void)
 {
+    pci_unregister_driver(&bce_pci_driver);
+
     //aaudio_module_exit();
     bce_vhci_module_exit();
-    pci_unregister_driver(&bce_pci_driver);
     class_destroy(bce_class);
     unregister_chrdev_region(bce_chrdev, 1);
 }
