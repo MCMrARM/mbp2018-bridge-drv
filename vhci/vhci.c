@@ -243,6 +243,42 @@ static int bce_vhci_get_frame_number(struct usb_hcd *hcd)
     return 0;
 }
 
+int bce_vhci_bus_suspend(struct usb_hcd *hcd)
+{
+    int status;
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    pr_info("bce_vhci: suspend started\n");
+
+    if ((status = bce_vhci_cmd_controller_pause(&vhci->cq)))
+        return status;
+
+    bce_vhci_event_queue_pause(&vhci->ev_commands);
+    bce_vhci_event_queue_pause(&vhci->ev_system);
+    bce_vhci_event_queue_pause(&vhci->ev_isochronous);
+    bce_vhci_event_queue_pause(&vhci->ev_interrupt);
+    bce_vhci_event_queue_pause(&vhci->ev_asynchronous);
+    pr_info("bce_vhci: suspend done\n");
+    return 0;
+}
+
+int bce_vhci_bus_resume(struct usb_hcd *hcd)
+{
+    int status;
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    pr_info("bce_vhci: resume started\n");
+
+    bce_vhci_event_queue_resume(&vhci->ev_system);
+    bce_vhci_event_queue_resume(&vhci->ev_isochronous);
+    bce_vhci_event_queue_resume(&vhci->ev_interrupt);
+    bce_vhci_event_queue_resume(&vhci->ev_asynchronous);
+    bce_vhci_event_queue_resume(&vhci->ev_commands);
+
+    if ((status = bce_vhci_cmd_controller_start(&vhci->cq)))
+        return status;
+    pr_info("bce_vhci: resume done\n");
+    return 0;
+}
+
 static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
 {
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
@@ -447,30 +483,37 @@ static void bce_vhci_handle_firmware_events_w(struct work_struct *ws)
     int result;
     struct bce_vhci *vhci = container_of(ws, struct bce_vhci, w_fw_events);
     struct bce_queue_sq *sq = vhci->ev_commands.sq;
+    struct bce_sq_completion_data *cq;
     struct bce_vhci_message *msg, *msg2 = NULL;
 
     while (true) {
         if (msg2) {
             msg = msg2;
             msg2 = NULL;
-        } else if (bce_next_completion(sq)) {
+        } else if ((cq = bce_next_completion(sq))) {
+            if (cq->status == BCE_COMPLETION_ABORTED) {
+                bce_notify_submission_complete(sq);
+                continue;
+            }
             msg = &vhci->ev_commands.data[sq->head];
         } else {
             break;
         }
 
         pr_debug("bce-vhci: Got fw event: %x s=%x p1=%x p2=%llx\n", msg->cmd, msg->status, msg->param1, msg->param2);
-        if (bce_next_completion(sq)) {
+        if ((cq = bce_next_completion(sq))) {
             msg2 = &vhci->ev_commands.data[(sq->head + 1) % sq->el_count];
             pr_debug("bce-vhci: Got second fw event: %x s=%x p1=%x p2=%llx\n",
                     msg->cmd, msg->status, msg->param1, msg->param2);
-            if (msg2->cmd == (msg->cmd | 0x4000) && msg2->param1 == msg->param1) {
+            if (cq->status != BCE_COMPLETION_ABORTED &&
+                msg2->cmd == (msg->cmd | 0x4000) && msg2->param1 == msg->param1) {
                 /* Take two elements */
                 pr_debug("bce-vhci: Cancelled\n");
                 bce_vhci_send_fw_event_response(vhci, msg, BCE_VHCI_ABORT);
 
                 bce_notify_submission_complete(sq);
                 bce_notify_submission_complete(sq);
+                msg2 = NULL;
                 cnt += 2;
                 continue;
             }
@@ -486,6 +529,10 @@ static void bce_vhci_handle_firmware_events_w(struct work_struct *ws)
         ++cnt;
     }
     bce_vhci_event_queue_submit_pending(&vhci->ev_commands, cnt);
+    if (atomic_read(&sq->available_commands) == sq->el_count - 1) {
+        pr_debug("bce-vhci: complete\n");
+        complete(&vhci->ev_commands.queue_empty_completion);
+    }
 }
 
 static void bce_vhci_firmware_event_completion(struct bce_queue_sq *sq)
@@ -546,7 +593,9 @@ static const struct hc_driver bce_vhci_driver = {
         .drop_endpoint = bce_vhci_drop_endpoint,
         .endpoint_reset = bce_vhci_endpoint_reset,
         .check_bandwidth = bce_vhci_check_bandwidth,
-        .get_frame_number = bce_vhci_get_frame_number
+        .get_frame_number = bce_vhci_get_frame_number,
+        .bus_suspend = bce_vhci_bus_suspend,
+        .bus_resume = bce_vhci_bus_resume
 };
 
 

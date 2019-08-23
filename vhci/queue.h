@@ -41,6 +41,7 @@ struct bce_vhci_event_queue {
     struct bce_vhci_message *data;
     dma_addr_t dma_addr;
     bce_vhci_event_queue_callback cb;
+    struct completion queue_empty_completion;
 };
 struct bce_vhci_command_queue_completion {
     struct bce_vhci_message *result;
@@ -63,6 +64,8 @@ int bce_vhci_event_queue_create(struct bce_vhci *vhci, struct bce_vhci_event_que
         bce_vhci_event_queue_callback cb);
 void bce_vhci_event_queue_destroy(struct bce_vhci *vhci, struct bce_vhci_event_queue *q);
 void bce_vhci_event_queue_submit_pending(struct bce_vhci_event_queue *q, size_t count);
+void bce_vhci_event_queue_pause(struct bce_vhci_event_queue *q);
+void bce_vhci_event_queue_resume(struct bce_vhci_event_queue *q);
 
 void bce_vhci_command_queue_create(struct bce_vhci_command_queue *ret, struct bce_vhci_message_queue *mq);
 void bce_vhci_command_queue_destroy(struct bce_vhci_command_queue *cq);

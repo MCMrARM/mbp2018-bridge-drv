@@ -138,6 +138,7 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     while ((c = bce_next_completion(sq))) {
         if (c->status == BCE_COMPLETION_ABORTED) { /* We flushed the queue */
             pr_debug("bce-vhci: [%02x] Got an abort completion\n", q->endp_addr);
+            bce_notify_submission_complete(sq);
             continue;
         }
         if (list_empty(&q->endp->urb_list)) {
