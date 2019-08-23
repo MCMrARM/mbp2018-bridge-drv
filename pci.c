@@ -88,7 +88,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     global_bce = bce;
 
-    //bce_vhci_create(bce, &bce->vhci);
+    bce_vhci_create(bce, &bce->vhci);
 
     return 0;
 
@@ -219,7 +219,7 @@ static void bce_remove(struct pci_dev *dev)
     struct bce_device *bce = pci_get_drvdata(dev);
     bce->is_being_removed = true;
 
-    //bce_vhci_destroy(&bce->vhci);
+    bce_vhci_destroy(&bce->vhci);
 
     bce_timestamp_stop(&bce->timestamp);
     pci_free_irq(dev, 0, dev);
