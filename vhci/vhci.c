@@ -3,10 +3,12 @@
 #include "command.h"
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
+#include <linux/module.h>
 
 static dev_t bce_vhci_chrdev;
 static struct class *bce_vhci_class;
 static const struct hc_driver bce_vhci_driver;
+static u16 bce_vhci_port_mask = U16_MAX;
 
 static int bce_vhci_create_event_queues(struct bce_vhci *vhci);
 static void bce_vhci_destroy_event_queues(struct bce_vhci *vhci);
@@ -134,11 +136,14 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
         ps->wPortStatus = 0;
         ps->wPortChange = 0;
 
-        if ((status = bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0, &port_status)))
-            return status;
-
         if (vhci->port_power_mask & BIT(wIndex))
             ps->wPortStatus |= USB_PORT_STAT_POWER;
+
+        if (!(bce_vhci_port_mask & BIT(wIndex)))
+            return 0;
+
+        if ((status = bce_vhci_cmd_port_status(&vhci->cq, (u8) wIndex, 0, &port_status)))
+            return status;
 
         if (port_status & 16)
             ps->wPortStatus |= USB_PORT_STAT_ENABLE | USB_PORT_STAT_HIGH_SPEED;
@@ -624,3 +629,6 @@ void __exit bce_vhci_module_exit(void)
     class_destroy(bce_vhci_class);
     unregister_chrdev_region(bce_vhci_chrdev, 1);
 }
+
+module_param_named(vhci_port_mask, bce_vhci_port_mask, ushort, 0444);
+MODULE_PARM_DESC(vhci_port_mask, "Specifies which VHCI ports are enabled");
