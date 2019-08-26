@@ -344,7 +344,7 @@ static int bce_resume(struct device *dev)
      * DMA memory and the suspend fails (device panics). Note that non-DMA mailbox messages do work, only the DMA ones
      * fail.
      */
-    msleep(1);
+    msleep(20);
 
     if ((status = bce_restore_state_and_wake(bce)))
         return status;
