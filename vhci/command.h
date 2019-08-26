@@ -116,7 +116,6 @@ static inline int bce_vhci_cmd_port_disable(struct bce_vhci_command_queue *q, bc
     struct bce_vhci_message cmd, res;
     cmd.cmd = BCE_VHCI_CMD_PORT_DISABLE;
     cmd.param1 = port;
-    dump_stack();
     return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
 }
 static inline int bce_vhci_cmd_port_status(struct bce_vhci_command_queue *q, bce_vhci_port_t port,
