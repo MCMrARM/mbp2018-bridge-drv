@@ -5,6 +5,8 @@
 #include <linux/usb/hcd.h>
 
 static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq);
+static void bce_vhci_transfer_queue_giveback(struct bce_vhci_transfer_queue *q);
+static void bce_vhci_transfer_queue_remove_pending(struct bce_vhci_transfer_queue *q);
 
 static int bce_vhci_urb_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg);
 static int bce_vhci_urb_transfer_completion(struct bce_vhci_urb *urb, struct bce_sq_completion_data *c);
@@ -24,6 +26,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     q->endp_addr = (u8) (endp->desc.bEndpointAddress & 0x8F);
     q->state = BCE_VHCI_ENDPOINT_ACTIVE;
     q->active = true;
+    q->stalled = false;
     q->cq = bce_create_cq(vhci->dev, 0x100);
     INIT_WORK(&q->w_reset, bce_vhci_transfer_queue_reset_w);
     q->sq_in = NULL;
@@ -42,6 +45,8 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
 
 void bce_vhci_destroy_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_transfer_queue *q)
 {
+    bce_vhci_transfer_queue_giveback(q);
+    bce_vhci_transfer_queue_remove_pending(q);
     if (q->sq_in)
         bce_destroy_sq(vhci->dev, q->sq_in);
     if (q->sq_out)
