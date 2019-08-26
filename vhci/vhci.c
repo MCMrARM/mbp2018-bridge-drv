@@ -216,11 +216,8 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
     bce_vhci_device_t devid;
     pr_info("bce_vhci_enable_device\n");
 
-    if (vhci->port_to_device[udev->portnum]) {
-        vdev = vhci->devices[vhci->port_to_device[udev->portnum]];
-        udev->ep0.hcpriv = &vdev->tq[0];
+    if (vhci->port_to_device[udev->portnum])
         return 0;
-    }
 
     /* We need to early address the device */
     if (bce_vhci_cmd_device_create(&vhci->cq, udev->portnum, &devid))
@@ -240,6 +237,30 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
     return 0;
 }
 
+static void bce_vhci_free_device(struct usb_hcd *hcd, struct usb_device *udev)
+{
+    struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
+    int i;
+    bce_vhci_device_t devid;
+    struct bce_vhci_device *dev;
+    pr_info("bce_vhci_free_device %i\n", udev->portnum);
+    if (!vhci->port_to_device[udev->portnum])
+        return;
+    devid = vhci->port_to_device[udev->portnum];
+    dev = vhci->devices[devid];
+    for (i = 0; i < 32; i++) {
+        if (dev->tq_mask & BIT(i)) {
+            bce_vhci_transfer_queue_pause(&dev->tq[i]);
+            bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) i);
+            bce_vhci_destroy_transfer_queue(vhci, &dev->tq[i]);
+        }
+    }
+    vhci->devices[devid] = NULL;
+    vhci->port_to_device[udev->portnum] = 0;
+    bce_vhci_cmd_device_destroy(&vhci->cq, devid);
+    kfree(dev);
+}
+
 static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
 {
     struct bce_vhci_device *dev = NULL;
@@ -248,7 +269,6 @@ static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
     int status;
     enum dma_data_direction dir;
     pr_info("bce_vhci_reset_device %i\n", index);
-    dump_stack();
 
     devid = vhci->port_to_device[index];
     if (devid) {
@@ -686,6 +706,7 @@ static const struct hc_driver bce_vhci_driver = {
         .urb_enqueue = bce_vhci_urb_enqueue,
         .urb_dequeue = bce_vhci_urb_dequeue,
         .enable_device = bce_vhci_enable_device,
+        .free_dev = bce_vhci_free_device,
         .address_device = bce_vhci_address_device,
         .add_endpoint = bce_vhci_add_endpoint,
         .drop_endpoint = bce_vhci_drop_endpoint,
