@@ -112,6 +112,8 @@ static int bce_vhci_hub_status_data(struct usb_hcd *hcd, char *buf)
     return 0;
 }
 
+static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout);
+
 static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u16 wIndex, char *buf, u16 wLength)
 {
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
@@ -176,11 +178,7 @@ static int bce_vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u1
             return status;
         }
         if (wValue == USB_PORT_FEAT_RESET) {
-            /* The device does not support being reset more than once, so workaround it */
-            if (vhci->port_reset_mask & BIT(wIndex))
-                return 0;
-            vhci->port_reset_mask |= BIT(wIndex);
-            return bce_vhci_cmd_port_reset(&vhci->cq, (u8) wIndex, wValue);
+            return bce_vhci_reset_device(vhci, wIndex, wValue);
         }
         if (wValue == USB_PORT_FEAT_SUSPEND) {
             /* TODO: Am I supposed to also suspend the endpoints? */
@@ -237,6 +235,53 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
 
     bce_vhci_cmd_endpoint_create(&vhci->cq, devid, &udev->ep0.desc);
     return 0;
+}
+
+static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
+{
+    struct bce_vhci_device *dev = NULL;
+    bce_vhci_device_t devid;
+    int i;
+    int status;
+    enum dma_data_direction dir;
+    pr_info("bce_vhci_reset_device %i\n", index);
+    dump_stack();
+
+    devid = vhci->port_to_device[index];
+    if (devid) {
+        dev = vhci->devices[devid];
+
+        for (i = 0; i < 32; i++) {
+            if (dev->tq_mask & BIT(i)) {
+                bce_vhci_transfer_queue_pause(&dev->tq[i]);
+                bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) i);
+                bce_vhci_destroy_transfer_queue(vhci, &dev->tq[i]);
+            }
+        }
+        vhci->devices[devid] = NULL;
+        vhci->port_to_device[devid] = 0;
+    }
+    bce_vhci_cmd_device_destroy(&vhci->cq, devid);
+    status = bce_vhci_cmd_port_reset(&vhci->cq, (u8) index, timeout);
+
+    if (dev) {
+        if ((status = bce_vhci_cmd_device_create(&vhci->cq, index, &devid)))
+            return status;
+        vhci->devices[devid] = dev;
+        vhci->port_to_device[index] = devid;
+
+        for (i = 0; i < 32; i++) {
+            if (dev->tq_mask & BIT(i)) {
+                dir = usb_endpoint_dir_in(&dev->tq[i].endp->desc) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
+                if (i == 0)
+                    dir = DMA_BIDIRECTIONAL;
+                bce_vhci_create_transfer_queue(vhci, &dev->tq[i], dev->tq[i].endp, devid, dir);
+                bce_vhci_cmd_endpoint_create(&vhci->cq, devid, &dev->tq[i].endp->desc);
+            }
+        }
+    }
+
+    return status;
 }
 
 static int bce_vhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
@@ -332,7 +377,7 @@ static int bce_vhci_bus_resume(struct usb_hcd *hcd)
 static int bce_vhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags)
 {
     struct bce_vhci_transfer_queue *q = urb->ep->hcpriv;
-    pr_debug("bce_vhci_urb_enqueue %x\n", urb->ep->desc.bEndpointAddress);
+    pr_debug("bce_vhci_urb_enqueue %i:%x\n", q->dev_addr, urb->ep->desc.bEndpointAddress);
     if (!q)
         return -ENOENT;
     return bce_vhci_urb_create(q, urb);

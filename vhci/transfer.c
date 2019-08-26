@@ -26,11 +26,13 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     q->active = true;
     q->cq = bce_create_cq(vhci->dev, 0x100);
     INIT_WORK(&q->w_reset, bce_vhci_transfer_queue_reset_w);
+    q->sq_in = NULL;
     if (dir == DMA_FROM_DEVICE || dir == DMA_BIDIRECTIONAL) {
         snprintf(name, sizeof(name), "VHC1-%i-%02x", dev_addr, 0x80 | usb_endpoint_num(&endp->desc));
         q->sq_in = bce_create_sq(vhci->dev, q->cq, name, 0x100, DMA_FROM_DEVICE,
                                  bce_vhci_transfer_queue_completion, q);
     }
+    q->sq_out = NULL;
     if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL) {
         snprintf(name, sizeof(name), "VHC1-%i-%02x", dev_addr, usb_endpoint_num(&endp->desc));
         q->sq_out = bce_create_sq(vhci->dev, q->cq, name, 0x100, DMA_TO_DEVICE,

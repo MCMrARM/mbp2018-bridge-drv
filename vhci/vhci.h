@@ -33,7 +33,6 @@ struct bce_vhci {
     u16 port_mask;
     u8 port_count;
     u16 port_power_mask;
-    u16 port_reset_mask;
     bce_vhci_device_t port_to_device[16];
     struct bce_vhci_device *devices[16];
     struct workqueue_struct *tq_state_wq;
