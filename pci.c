@@ -63,6 +63,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
     bce_timestamp_init(&bce->timestamp, bce->reg_mem_mb);
 
+    spin_lock_init(&bce->queues_lock);
     ida_init(&bce->queue_ida);
 
     if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")))
@@ -173,9 +174,11 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev)
 {
     int i;
     struct bce_device *bce = pci_get_drvdata(dev);
+    spin_lock(&bce->queues_lock);
     for (i = 0; i < BCE_MAX_QUEUE_COUNT; i++)
         if (bce->queues[i] && bce->queues[i]->type == BCE_QUEUE_CQ)
             bce_handle_cq_completions(bce, (struct bce_queue_cq *) bce->queues[i]);
+    spin_unlock(&bce->queues_lock);
     return IRQ_HANDLED;
 }
 
