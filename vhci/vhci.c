@@ -216,8 +216,11 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
     bce_vhci_device_t devid;
     pr_info("bce_vhci_enable_device\n");
 
-    if (vhci->port_to_device[udev->portnum])
+    if (vhci->port_to_device[udev->portnum]) {
+        vdev = vhci->devices[vhci->port_to_device[udev->portnum]];
+        udev->ep0.hcpriv = &vdev->tq[0];
         return 0;
+    }
 
     /* We need to early address the device */
     if (bce_vhci_cmd_device_create(&vhci->cq, udev->portnum, &devid))
@@ -260,8 +263,8 @@ static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
         }
         vhci->devices[devid] = NULL;
         vhci->port_to_device[devid] = 0;
+        bce_vhci_cmd_device_destroy(&vhci->cq, devid);
     }
-    bce_vhci_cmd_device_destroy(&vhci->cq, devid);
     status = bce_vhci_cmd_port_reset(&vhci->cq, (u8) index, timeout);
 
     if (dev) {
@@ -447,11 +450,10 @@ static int bce_vhci_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev, 
             return 0;
         }
     }
-    /*
-    bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) (endp->desc.bEndpointAddress & 0x8F));
+
+    bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) (endp->desc.bEndpointAddress & 0x8Fu));
     vhci->devices[devid]->tq_mask &= ~BIT(endp_index);
     bce_vhci_destroy_transfer_queue(vhci, q);
-    */
     return 0;
 }
 
