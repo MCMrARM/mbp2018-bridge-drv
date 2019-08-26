@@ -69,8 +69,6 @@ fail_dev:
 
 void bce_vhci_destroy(struct bce_vhci *vhci)
 {
-    dev_info(vhci->vdev, "test msg\n");
-    dev_info(vhci->hcd->self.controller, "test msg\n");
     usb_remove_hcd(vhci->hcd);
     bce_vhci_destroy_event_queues(vhci);
     bce_vhci_destroy_message_queues(vhci);
@@ -256,12 +254,31 @@ static int bce_vhci_get_frame_number(struct usb_hcd *hcd)
     return 0;
 }
 
-int bce_vhci_bus_suspend(struct usb_hcd *hcd)
+static int bce_vhci_bus_suspend(struct usb_hcd *hcd)
 {
+    int i, j;
     int status;
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
     pr_info("bce_vhci: suspend started\n");
 
+    pr_info("bce_vhci: suspend endpoints\n");
+    for (i = 0; i < 16; i++) {
+        if (!vhci->port_to_device[i])
+            continue;
+        for (j = 0; j < 32; j++) {
+            if (!(vhci->devices[vhci->port_to_device[i]]->tq_mask & BIT(j)))
+                continue;
+            bce_vhci_transfer_queue_pause(&vhci->devices[vhci->port_to_device[i]]->tq[j]);
+        }
+    }
+
+    pr_info("bce_vhci: suspend ports\n");
+    for (i = 0; i < 16; i++) {
+        if (!vhci->port_to_device[i])
+            continue;
+        bce_vhci_cmd_port_suspend(&vhci->cq, i);
+    }
+    pr_info("bce_vhci: suspend controller\n");
     if ((status = bce_vhci_cmd_controller_pause(&vhci->cq)))
         return status;
 
@@ -274,8 +291,9 @@ int bce_vhci_bus_suspend(struct usb_hcd *hcd)
     return 0;
 }
 
-int bce_vhci_bus_resume(struct usb_hcd *hcd)
+static int bce_vhci_bus_resume(struct usb_hcd *hcd)
 {
+    int i, j;
     int status;
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
     pr_info("bce_vhci: resume started\n");
@@ -286,8 +304,27 @@ int bce_vhci_bus_resume(struct usb_hcd *hcd)
     bce_vhci_event_queue_resume(&vhci->ev_asynchronous);
     bce_vhci_event_queue_resume(&vhci->ev_commands);
 
+    pr_info("bce_vhci: resume controller\n");
     if ((status = bce_vhci_cmd_controller_start(&vhci->cq)))
         return status;
+
+    pr_info("bce_vhci: resume ports\n");
+    for (i = 0; i < 16; i++) {
+        if (!vhci->port_to_device[i])
+            continue;
+        bce_vhci_cmd_port_resume(&vhci->cq, i);
+    }
+    pr_info("bce_vhci: resume endpoints\n");
+    for (i = 0; i < 16; i++) {
+        if (!vhci->port_to_device[i])
+            continue;
+        for (j = 0; j < 32; j++) {
+            if (!(vhci->devices[vhci->port_to_device[i]]->tq_mask & BIT(j)))
+                continue;
+            bce_vhci_transfer_queue_resume(&vhci->devices[vhci->port_to_device[i]]->tq[j]);
+        }
+    }
+
     pr_info("bce_vhci: resume done\n");
     return 0;
 }
