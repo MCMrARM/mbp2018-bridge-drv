@@ -150,10 +150,11 @@ static void aaudio_pcm_start(struct snd_pcm_substream *substream)
     struct aaudio_subdevice *sdev = snd_pcm_substream_chip(substream);
     struct aaudio_stream *stream = aaudio_pcm_stream(substream);
     void *buf;
+    size_t s;
     ktime_t time_start, time_end;
     time_start = ktime_get();
 
-    size_t s = frames_to_bytes(substream->runtime, substream->runtime->control->appl_ptr);
+    s = frames_to_bytes(substream->runtime, substream->runtime->control->appl_ptr);
     buf = kmalloc(s, GFP_KERNEL);
     memcpy_fromio(buf, substream->runtime->dma_area, s);
     time_end = ktime_get();
