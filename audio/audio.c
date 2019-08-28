@@ -5,6 +5,7 @@
 #include <sound/core.h>
 #include <sound/initval.h>
 #include <sound/pcm.h>
+#include <sound/jack.h>
 #include "audio.h"
 #include "pcm.h"
 
@@ -190,6 +191,7 @@ static int aaudio_init_cmd(struct aaudio_device *a)
 }
 
 static void aaudio_init_stream_info(struct aaudio_subdevice *sdev, struct aaudio_stream *strm);
+static void aaudio_handle_jack_connection_change(struct aaudio_subdevice *sdev);
 
 static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
 {
@@ -258,8 +260,15 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
         aaudio_init_stream_info(sdev, &sdev->out_streams[i]);
     }
 
-    if (sdev->is_pcm) {
+    if (sdev->is_pcm)
         aaudio_create_pcm(sdev);
+    /* Headphone Jack status */
+    if (!strcmp(sdev->uid, "Codec Output")) {
+        if (snd_jack_new(a->card, sdev->uid, SND_JACK_HEADPHONE, &sdev->jack, true, false))
+            dev_warn(a->dev, "Failed to create an attached jack for %s\n", sdev->uid);
+        aaudio_cmd_property_listener(a, sdev->dev_id, sdev->dev_id,
+                AAUDIO_PROP(AAUDIO_PROP_SCOPE_OUTPUT, AAUDIO_PROP_JACK_PLUGGED, 0));
+        aaudio_handle_jack_connection_change(sdev);
     }
 
     aaudio_reply_free(&buf);
@@ -408,6 +417,8 @@ static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream 
     }
 }
 
+static void aaudio_handle_prop_change(struct aaudio_device *a, struct aaudio_msg *msg);
+
 void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
 {
     struct aaudio_send_ctx sctx;
@@ -428,10 +439,69 @@ void aaudio_handle_notification(struct aaudio_device *a, struct aaudio_msg *msg)
             dev_info(a->dev, "Received alive notification from remote\n");
             complete_all(&a->remote_alive);
             break;
+        case AAUDIO_MSG_PROPERTY_CHANGED:
+            aaudio_handle_prop_change(a, msg);
+            break;
         default:
             dev_info(a->dev, "Unhandled notification %i", base.msg);
             break;
     }
+}
+
+struct aaudio_prop_change_work_struct {
+    struct work_struct ws;
+    struct aaudio_device *a;
+    aaudio_device_id_t dev;
+    aaudio_object_id_t obj;
+    struct aaudio_prop_addr prop;
+};
+
+static void aaudio_handle_jack_connection_change(struct aaudio_subdevice *sdev)
+{
+    u32 plugged;
+    if (!sdev->jack)
+        return;
+    /* NOTE: Apple made the plug status scoped to the input and output streams. This makes no sense for us, so I just
+     * always pick the OUTPUT status. */
+    if (aaudio_cmd_get_primitive_property(sdev->a, sdev->dev_id, sdev->dev_id,
+            AAUDIO_PROP(AAUDIO_PROP_SCOPE_OUTPUT, AAUDIO_PROP_JACK_PLUGGED, 0), NULL, 0, &plugged, sizeof(plugged))) {
+        dev_err(sdev->a->dev, "Failed to get jack enable status\n");
+        return;
+    }
+    dev_dbg(sdev->a->dev, "Jack is now %s\n", plugged ? "plugged" : "unplugged");
+    snd_jack_report(sdev->jack, plugged ? sdev->jack->type : 0);
+}
+
+void aaudio_handle_prop_change_work(struct work_struct *ws)
+{
+    struct aaudio_prop_change_work_struct *work = container_of(ws, struct aaudio_prop_change_work_struct, ws);
+    struct aaudio_subdevice *sdev;
+
+    sdev = aaudio_find_dev_by_dev_id(work->a, work->dev);
+    if (!sdev) {
+        dev_err(work->a->dev, "Property notification change: device not found\n");
+        goto done;
+    }
+    dev_dbg(work->a->dev, "Property changed for device: %s\n", sdev->uid);
+
+    if (work->prop.scope == AAUDIO_PROP_SCOPE_OUTPUT && work->prop.selector == AAUDIO_PROP_JACK_PLUGGED) {
+        aaudio_handle_jack_connection_change(sdev);
+    }
+
+done:
+    kfree(work);
+}
+
+void aaudio_handle_prop_change(struct aaudio_device *a, struct aaudio_msg *msg)
+{
+    /* NOTE: This is a scheduled work because this callback will generally need to query device information and this
+     * is not possible when we are in the reply parsing code's context. */
+    struct aaudio_prop_change_work_struct *work;
+    work = kmalloc(sizeof(struct aaudio_prop_change_work_struct), GFP_KERNEL);
+    work->a = a;
+    INIT_WORK(&work->ws, aaudio_handle_prop_change_work);
+    aaudio_msg_read_property_changed(msg, &work->dev, &work->obj, &work->prop);
+    schedule_work(&work->ws);
 }
 
 #define aaudio_send_cmd_response(a, sctx, msg, fn, ...) \

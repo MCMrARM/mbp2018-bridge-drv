@@ -76,6 +76,8 @@ enum {
 
 enum {
     AAUDIO_PROP_UID          = 0x75696420, // 'uid '
+    AAUDIO_PROP_BOOL_VALUE   = 0x6263766c, // 'bcvl'
+    AAUDIO_PROP_JACK_PLUGGED = 0x6a61636b, // 'jack'
     AAUDIO_PROP_SEL_VOLUME   = 0x64656176, // 'deav'
     AAUDIO_PROP_LATENCY      = 0x6c746e63, // 'ltnc'
     AAUDIO_PROP_PHYS_FORMAT  = 0x70667420  // 'pft '

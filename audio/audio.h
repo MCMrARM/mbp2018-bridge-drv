@@ -17,6 +17,7 @@
 struct snd_card;
 struct snd_pcm;
 struct snd_pcm_hardware;
+struct snd_jack;
 
 struct __attribute__((packed)) __attribute__((aligned(4))) aaudio_buffer_struct_buffer {
     size_t address;
@@ -79,6 +80,7 @@ struct aaudio_subdevice {
     struct aaudio_stream out_streams[AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS];
     bool is_pcm;
     struct snd_pcm *pcm;
+    struct snd_jack *jack;
 };
 
 struct aaudio_device {
