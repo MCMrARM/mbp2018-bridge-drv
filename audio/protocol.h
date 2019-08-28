@@ -46,6 +46,9 @@ enum {
     AAUDIO_MSG_GET_PROPERTY_RESPONSE = 8,
     AAUDIO_MSG_SET_PROPERTY = 9,
     AAUDIO_MSG_SET_PROPERTY_RESPONSE = 10,
+    AAUDIO_MSG_PROPERTY_LISTENER = 11,
+    AAUDIO_MSG_PROPERTY_LISTENER_RESPONSE = 12,
+    AAUDIO_MSG_PROPERTY_CHANGED = 13,
     AAUDIO_MSG_GET_INPUT_STREAM_LIST = 24,
     AAUDIO_MSG_GET_INPUT_STREAM_LIST_RESPONSE = 25,
     AAUDIO_MSG_GET_OUTPUT_STREAM_LIST = 26,
@@ -87,6 +90,10 @@ int aaudio_msg_read_update_timestamp(struct aaudio_msg *msg, aaudio_device_id_t 
 int aaudio_msg_read_get_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj,
         struct aaudio_prop_addr *prop, void **data, u64 *data_size);
 int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_id_t *obj);
+int aaudio_msg_read_property_listener_response(struct aaudio_msg *msg,aaudio_object_id_t *obj,
+        struct aaudio_prop_addr *prop);
+int aaudio_msg_read_property_changed(struct aaudio_msg *msg, aaudio_device_id_t *devid, aaudio_object_id_t *obj,
+        struct aaudio_prop_addr *prop);
 int aaudio_msg_read_get_input_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt);
 int aaudio_msg_read_get_output_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt);
 int aaudio_msg_read_set_remote_access_response(struct aaudio_msg *msg);
@@ -98,6 +105,8 @@ void aaudio_msg_write_get_property(struct aaudio_msg *msg, aaudio_device_id_t de
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size);
 void aaudio_msg_write_set_property(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *data, u64 data_size, void *qualifier, u64 qualifier_size);
+void aaudio_msg_write_property_listener(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop);
 void aaudio_msg_write_get_input_stream_list(struct aaudio_msg *msg, aaudio_device_id_t devid);
 void aaudio_msg_write_get_output_stream_list(struct aaudio_msg *msg, aaudio_device_id_t devid);
 void aaudio_msg_write_set_remote_access(struct aaudio_msg *msg, u64 mode);
@@ -116,6 +125,8 @@ int aaudio_cmd_get_primitive_property(struct aaudio_device *a,
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size);
 int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
         struct aaudio_prop_addr prop, void *qualifier, u64 qualifier_size, void *data, u64 data_size);
+int aaudio_cmd_property_listener(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop);
 int aaudio_cmd_get_input_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,
         aaudio_object_id_t **str_l, u64 *str_cnt);
 int aaudio_cmd_get_output_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,

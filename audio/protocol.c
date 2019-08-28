@@ -61,6 +61,29 @@ int aaudio_msg_read_set_property_response(struct aaudio_msg *msg, aaudio_object_
     return 0;
 }
 
+int aaudio_msg_read_property_listener_response(struct aaudio_msg *msg, aaudio_object_id_t *obj,
+        struct aaudio_prop_addr *prop)
+{
+    READ_START(AAUDIO_MSG_PROPERTY_LISTENER_RESPONSE);
+    READ_VAR(aaudio_object_id_t, obj);
+    READ_VAR(u32, &prop->element);
+    READ_VAR(u32, &prop->scope);
+    READ_VAR(u32, &prop->selector);
+    return 0;
+}
+
+int aaudio_msg_read_property_changed(struct aaudio_msg *msg, aaudio_device_id_t *devid, aaudio_object_id_t *obj,
+        struct aaudio_prop_addr *prop)
+{
+    READ_START(AAUDIO_MSG_PROPERTY_CHANGED);
+    READ_DEVID_VAR(devid);
+    READ_VAR(aaudio_object_id_t, obj);
+    READ_VAR(u32, &prop->element);
+    READ_VAR(u32, &prop->scope);
+    READ_VAR(u32, &prop->selector);
+    return 0;
+}
+
 int aaudio_msg_read_get_input_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt)
 {
     READ_START(AAUDIO_MSG_GET_INPUT_STREAM_LIST_RESPONSE);
@@ -147,6 +170,18 @@ void aaudio_msg_write_set_property(struct aaudio_msg *msg, aaudio_device_id_t de
     WRITE_BIN(data, data_size);
     WRITE_VAL(u64, qualifier_size);
     WRITE_BIN(qualifier, qualifier_size);
+    WRITE_END();
+}
+
+void aaudio_msg_write_property_listener(struct aaudio_msg *msg, aaudio_device_id_t dev, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop)
+{
+    WRITE_START_COMMAND(dev);
+    WRITE_BASE(AAUDIO_MSG_PROPERTY_LISTENER);
+    WRITE_VAL(aaudio_object_id_t, obj);
+    WRITE_VAL(u32, prop.element);
+    WRITE_VAL(u32, prop.scope);
+    WRITE_VAL(u32, prop.selector);
     WRITE_END();
 }
 
@@ -262,6 +297,12 @@ int aaudio_cmd_set_property(struct aaudio_device *a, aaudio_device_id_t devid, a
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_set_property, devid, obj, prop, data, data_size,
             qualifier, qualifier_size);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_set_property_response, &obj);
+}
+int aaudio_cmd_property_listener(struct aaudio_device *a, aaudio_device_id_t devid, aaudio_object_id_t obj,
+        struct aaudio_prop_addr prop)
+{
+    CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_property_listener, devid, obj, prop);
+    CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_property_listener_response, &obj, &prop);
 }
 int aaudio_cmd_get_input_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,
         aaudio_object_id_t **str_l, u64 *str_cnt)
