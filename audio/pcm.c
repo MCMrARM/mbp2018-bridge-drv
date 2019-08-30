@@ -92,8 +92,9 @@ int aaudio_create_hw_info(struct aaudio_apple_description *desc, struct snd_pcm_
     alsa_hw->period_bytes_max = desc->bytes_per_packet;
     alsa_hw->periods_min = (uint) (buf_size / desc->bytes_per_packet);
     alsa_hw->periods_max = (uint) (buf_size / desc->bytes_per_packet);
-    pr_debug("aaudio_create_hw_info: format = %llu, rate = %u/%u. periods = %u, period size = %lu\n",
-            alsa_hw->formats, alsa_hw->rate_min, alsa_hw->rates, alsa_hw->periods_min, alsa_hw->period_bytes_min);
+    pr_debug("aaudio_create_hw_info: format = %llu, rate = %u/%u. channels = %u, periods = %u, period size = %lu\n",
+            alsa_hw->formats, alsa_hw->rate_min, alsa_hw->rates, alsa_hw->channels_min, alsa_hw->periods_min,
+            alsa_hw->period_bytes_min);
     return 0;
 }
 
@@ -249,13 +250,21 @@ static struct snd_pcm_ops aaudio_pcm_ops = {
 int aaudio_create_pcm(struct aaudio_subdevice *sdev)
 {
     struct snd_pcm *pcm;
+    struct aaudio_alsa_pcm_id_mapping *id_mapping;
     int err;
 
     if (!sdev->is_pcm || (sdev->in_stream_cnt == 0 && sdev->out_stream_cnt == 0)) {
         return -EINVAL;
     }
 
-    sdev->alsa_id = sdev->a->next_alsa_id++;
+    for (id_mapping = aaudio_alsa_id_mappings; id_mapping->name; id_mapping++) {
+        if (!strcmp(sdev->uid, id_mapping->name)) {
+            sdev->alsa_id = id_mapping->alsa_id;
+            break;
+        }
+    }
+    if (!id_mapping->name)
+        sdev->alsa_id = sdev->a->next_alsa_id++;
     err = snd_pcm_new(sdev->a->card, sdev->uid, sdev->alsa_id,
             (int) sdev->out_stream_cnt, (int) sdev->in_stream_cnt, &pcm);
     if (err < 0)
