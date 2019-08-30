@@ -14,6 +14,8 @@
 #define AAUDIO_DEIVCE_MAX_OUTPUT_STREAMS 1
 #define AAUDIO_DEIVCE_MAX_BUFFER_COUNT 1
 
+#define AAUDIO_BUFFER_ID_NONE 0xffu
+
 struct snd_card;
 struct snd_pcm;
 struct snd_pcm_hardware;

@@ -84,6 +84,12 @@ int aaudio_msg_read_property_changed(struct aaudio_msg *msg, aaudio_device_id_t 
     return 0;
 }
 
+int aaudio_msg_read_set_input_stream_address_ranges_response(struct aaudio_msg *msg)
+{
+    READ_START(AAUDIO_MSG_SET_INPUT_STREAM_ADDRESS_RANGES_RESPONSE);
+    return 0;
+}
+
 int aaudio_msg_read_get_input_stream_list_response(struct aaudio_msg *msg, aaudio_object_id_t **str_l, u64 *str_cnt)
 {
     READ_START(AAUDIO_MSG_GET_INPUT_STREAM_LIST_RESPONSE);
@@ -182,6 +188,13 @@ void aaudio_msg_write_property_listener(struct aaudio_msg *msg, aaudio_device_id
     WRITE_VAL(u32, prop.element);
     WRITE_VAL(u32, prop.scope);
     WRITE_VAL(u32, prop.selector);
+    WRITE_END();
+}
+
+void aaudio_msg_write_set_input_stream_address_ranges(struct aaudio_msg *msg, aaudio_device_id_t devid)
+{
+    WRITE_START_COMMAND(devid);
+    WRITE_BASE(AAUDIO_MSG_SET_INPUT_STREAM_ADDRESS_RANGES);
     WRITE_END();
 }
 
@@ -303,6 +316,11 @@ int aaudio_cmd_property_listener(struct aaudio_device *a, aaudio_device_id_t dev
 {
     CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_property_listener, devid, obj, prop);
     CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_property_listener_response, &obj, &prop);
+}
+int aaudio_cmd_set_input_stream_address_ranges(struct aaudio_device *a, aaudio_device_id_t devid)
+{
+    CMD_DEF_SHARED_AND_SEND(aaudio_msg_write_set_input_stream_address_ranges, devid);
+    CMD_HNDL_REPLY_AND_FREE(aaudio_msg_read_set_input_stream_address_ranges_response);
 }
 int aaudio_cmd_get_input_stream_list(struct aaudio_device *a, struct aaudio_msg *buf, aaudio_device_id_t devid,
         aaudio_object_id_t **str_l, u64 *str_cnt)

@@ -152,20 +152,26 @@ static void aaudio_pcm_start(struct snd_pcm_substream *substream)
     void *buf;
     size_t s;
     ktime_t time_start, time_end;
+    bool back_buffer;
     time_start = ktime_get();
 
-    s = frames_to_bytes(substream->runtime, substream->runtime->control->appl_ptr);
-    buf = kmalloc(s, GFP_KERNEL);
-    memcpy_fromio(buf, substream->runtime->dma_area, s);
-    time_end = ktime_get();
-    pr_info("aaudio: Backed up the buffer in %lluns [%li]\n", ktime_to_ns(time_end - time_start),
-            substream->runtime->control->appl_ptr);
+    back_buffer = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK);
+
+    if (back_buffer) {
+        s = frames_to_bytes(substream->runtime, substream->runtime->control->appl_ptr);
+        buf = kmalloc(s, GFP_KERNEL);
+        memcpy_fromio(buf, substream->runtime->dma_area, s);
+        time_end = ktime_get();
+        pr_info("aaudio: Backed up the buffer in %lluns [%li]\n", ktime_to_ns(time_end - time_start),
+                substream->runtime->control->appl_ptr);
+    }
 
     stream->waiting_for_first_ts = true;
-    stream->frame_min = 0;
+    stream->frame_min = stream->latency;
 
     aaudio_cmd_start_io(sdev->a, sdev->dev_id);
-    memcpy_toio(substream->runtime->dma_area, buf, s);
+    if (back_buffer)
+        memcpy_toio(substream->runtime->dma_area, buf, s);
 
     time_end = ktime_get();
     pr_info("aaudio: Started the audio device in %lluns\n", ktime_to_ns(time_end - time_start));
@@ -222,13 +228,13 @@ static snd_pcm_uframes_t aaudio_pcm_pointer(struct snd_pcm_substream *substream)
         else
             stream->frame_min = 0; /* Heavy desync */
     }
-    //frames -= stream->latency + sdev->out_latency;
+    frames -= stream->latency;
     if (frames < 0)
         frames += ((-frames - 1) / buffer_time_length + 1) * buffer_time_length;
     return (snd_pcm_uframes_t) frames;
 }
 
-static struct snd_pcm_ops aaudio_pcm_playback_ops = {
+static struct snd_pcm_ops aaudio_pcm_ops = {
         .open =        aaudio_pcm_open,
         .close =       aaudio_pcm_close,
         .ioctl =       snd_pcm_lib_ioctl,
@@ -245,8 +251,7 @@ int aaudio_create_pcm(struct aaudio_subdevice *sdev)
     struct snd_pcm *pcm;
     int err;
 
-    if (!sdev->is_pcm || sdev->out_stream_cnt == 0) {
-        /* For now we only support output devices here */
+    if (!sdev->is_pcm || (sdev->in_stream_cnt == 0 && sdev->out_stream_cnt == 0)) {
         return -EINVAL;
     }
 
@@ -259,22 +264,19 @@ int aaudio_create_pcm(struct aaudio_subdevice *sdev)
     pcm->nonatomic = 1;
     sdev->pcm = pcm;
     strcpy(pcm->name, sdev->uid);
-    snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &aaudio_pcm_playback_ops);
+    snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &aaudio_pcm_ops);
+    snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &aaudio_pcm_ops);
     return 0;
 }
 
-void aaudio_handle_timestamp(struct aaudio_subdevice *sdev, ktime_t os_timestamp, u64 dev_timestamp)
+static void aaudio_handle_stream_timestamp(struct snd_pcm_substream *substream, ktime_t timestamp)
 {
     unsigned long flags;
-    struct snd_pcm_substream *substream;
     struct aaudio_stream *stream;
 
-    substream = sdev->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream;
-    if (!substream)
-        return;
     stream = aaudio_pcm_stream(substream);
     snd_pcm_stream_lock_irqsave(substream, flags);
-    stream->remote_timestamp = dev_timestamp;
+    stream->remote_timestamp = timestamp;
     if (stream->waiting_for_first_ts) {
         stream->waiting_for_first_ts = false;
         snd_pcm_stream_unlock_irqrestore(substream, flags);
@@ -282,4 +284,16 @@ void aaudio_handle_timestamp(struct aaudio_subdevice *sdev, ktime_t os_timestamp
     }
     snd_pcm_stream_unlock_irqrestore(substream, flags);
     snd_pcm_period_elapsed(substream);
+}
+
+void aaudio_handle_timestamp(struct aaudio_subdevice *sdev, ktime_t os_timestamp, u64 dev_timestamp)
+{
+    struct snd_pcm_substream *substream;
+
+    substream = sdev->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream;
+    if (substream)
+        aaudio_handle_stream_timestamp(substream, dev_timestamp);
+    substream = sdev->pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
+    if (substream)
+        aaudio_handle_stream_timestamp(substream, os_timestamp);
 }

@@ -34,6 +34,7 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
         status = -ENODEV;
         goto fail;
     }
+    pci_set_master(dev);
 
     aaudio = kzalloc(sizeof(struct aaudio_device), GFP_KERNEL);
     if (!aaudio) {
@@ -101,6 +102,10 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     if (aaudio_init_bs(aaudio)) {
         dev_err(&dev->dev, "aaudio: Failed to initialize BufferStruct\n");
         goto fail_snd;
+    }
+    if ((status = aaudio_cmd_set_remote_access(aaudio, AAUDIO_REMOTE_ACCESS_ON))) {
+        dev_err(&dev->dev, "Failed to set remote access\n");
+        return status;
     }
 
     if (snd_card_register(aaudio->card)) {
@@ -182,11 +187,6 @@ static int aaudio_init_cmd(struct aaudio_device *a)
         aaudio_init_dev(a, dev_l[dev_i]);
     aaudio_reply_free(&buf);
 
-    if ((status = aaudio_cmd_set_remote_access(a, AAUDIO_REMOTE_ACCESS_ON))) {
-        dev_err(a->dev, "Failed to set remote access\n");
-        return status;
-    }
-
     return 0;
 }
 
@@ -213,11 +213,13 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     sdev->a = a;
     INIT_LIST_HEAD(&sdev->list);
     sdev->dev_id = dev_id;
+    sdev->buf_id = AAUDIO_BUFFER_ID_NONE;
     strncpy(sdev->uid, uid, uid_len);
     sdev->uid[uid_len + 1] = '\0';
 
-    /* TESTING: Disable devices other than Speaker and Codec Output */
-    if (strcmp(sdev->uid, "Speaker") != 0 && strcmp(sdev->uid, "Codec Output") != 0) {
+    /* TESTING: Disable devices other than Speaker, Codec Output and Digital Mic */
+    if (strcmp(sdev->uid, "Speaker") != 0 && strcmp(sdev->uid, "Codec Output") != 0 &&
+        strcmp(sdev->uid, "Digital Mic") != 0) {
         goto fail;
     }
 
@@ -242,6 +244,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
         sdev->in_streams[i].id = stream_list[i];
         sdev->in_streams[i].buffer_cnt = 0;
         aaudio_init_stream_info(sdev, &sdev->in_streams[i]);
+        sdev->in_streams[i].latency += sdev->in_latency;
     }
 
     if (aaudio_cmd_get_output_stream_list(a, &buf, dev_id, &stream_list, &stream_cnt)) {
@@ -258,6 +261,7 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
         sdev->out_streams[i].id = stream_list[i];
         sdev->out_streams[i].buffer_cnt = 0;
         aaudio_init_stream_info(sdev, &sdev->out_streams[i]);
+        sdev->out_streams[i].latency += sdev->in_latency;
     }
 
     if (sdev->is_pcm)
@@ -334,6 +338,8 @@ static struct aaudio_subdevice *aaudio_find_dev_by_uid(struct aaudio_device *a, 
 
 static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream *strm,
         struct aaudio_buffer_struct_stream *bs_strm);
+static void aaudio_init_bs_stream_host(struct aaudio_device *a, struct aaudio_stream *strm,
+        struct aaudio_buffer_struct_stream *bs_strm);
 
 static int aaudio_init_bs(struct aaudio_device *a)
 {
@@ -370,17 +376,35 @@ static int aaudio_init_bs(struct aaudio_device *a)
             continue;
         }
         sdev->buf_id = (u8) i;
-        for (j = 0; j < dev->num_input_streams; j++) {
-            dev_info(a->dev, "aaudio: Device %i Stream %i: Input; Buffer Count = %i\n", i, j,
-                     dev->input_streams[j].num_buffers);
-            if (j < sdev->in_stream_cnt)
-                aaudio_init_bs_stream(a, &sdev->in_streams[j], &dev->input_streams[j]);
-        }
+        dev->num_input_streams = 0;
         for (j = 0; j < dev->num_output_streams; j++) {
             dev_info(a->dev, "aaudio: Device %i Stream %i: Output; Buffer Count = %i\n", i, j,
                      dev->output_streams[j].num_buffers);
             if (j < sdev->out_stream_cnt)
                 aaudio_init_bs_stream(a, &sdev->out_streams[j], &dev->output_streams[j]);
+        }
+    }
+
+    list_for_each_entry(sdev, &a->subdevice_list, list) {
+        if (sdev->buf_id != AAUDIO_BUFFER_ID_NONE)
+            continue;
+        sdev->buf_id = i;
+        dev_info(a->dev, "aaudio: Created device %i %s\n", i, sdev->uid);
+        strcpy(a->bs->devices[i].name, sdev->uid);
+        a->bs->devices[i].num_input_streams = 0;
+        a->bs->devices[i].num_output_streams = 0;
+        a->bs->num_devices = ++i;
+    }
+    list_for_each_entry(sdev, &a->subdevice_list, list) {
+        if (sdev->in_stream_cnt == 1) {
+            dev_info(a->dev, "aaudio: Device %i Host Stream; Input\n", sdev->buf_id, j, sdev->uid);
+            aaudio_init_bs_stream_host(a, &sdev->in_streams[0], &a->bs->devices[sdev->buf_id].input_streams[0]);
+            a->bs->devices[sdev->buf_id].num_input_streams = 1;
+            wmb();
+
+            if (aaudio_cmd_set_input_stream_address_ranges(a, sdev->dev_id)) {
+                dev_err(a->dev, "aaudio: Failed to set input stream address ranges\n");
+            }
         }
     }
 
@@ -397,6 +421,8 @@ static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream 
                 AAUDIO_DEIVCE_MAX_BUFFER_COUNT);
         strm->buffer_cnt = AAUDIO_DEIVCE_MAX_BUFFER_COUNT;
     }
+    if (!strm->buffer_cnt)
+        return;
     strm->buffers = kmalloc_array(strm->buffer_cnt, sizeof(struct aaudio_dma_buf), GFP_KERNEL);
     if (!strm->buffers) {
         dev_err(a->dev, "Buffer list allocation failed\n");
@@ -414,6 +440,41 @@ static void aaudio_init_bs_stream(struct aaudio_device *a, struct aaudio_stream 
             kfree(strm->alsa_hw_desc);
             strm->alsa_hw_desc = NULL;
         }
+    }
+}
+
+static void aaudio_init_bs_stream_host(struct aaudio_device *a, struct aaudio_stream *strm,
+        struct aaudio_buffer_struct_stream *bs_strm)
+{
+    size_t size;
+    dma_addr_t dma_addr;
+    void *dma_ptr;
+    size = strm->desc.bytes_per_packet * 16640;
+    dma_ptr = dma_alloc_coherent(&a->pci->dev, size, &dma_addr, GFP_KERNEL);
+    if (!dma_ptr) {
+        dev_err(a->dev, "dma_alloc_coherent failed\n");
+        return;
+    }
+    bs_strm->buffers[0].address = dma_addr;
+    bs_strm->buffers[0].size = size;
+    bs_strm->num_buffers = 1;
+
+    memset(dma_ptr, 0, size);
+
+    strm->buffer_cnt = 1;
+    strm->buffers = kmalloc_array(strm->buffer_cnt, sizeof(struct aaudio_dma_buf), GFP_KERNEL);
+    if (!strm->buffers) {
+        dev_err(a->dev, "Buffer list allocation failed\n");
+        return;
+    }
+    strm->buffers[0].dma_addr = dma_addr;
+    strm->buffers[0].ptr = dma_ptr;
+    strm->buffers[0].size = size;
+
+    strm->alsa_hw_desc = kmalloc(sizeof(struct snd_pcm_hardware), GFP_KERNEL);
+    if (aaudio_create_hw_info(&strm->desc, strm->alsa_hw_desc, strm->buffers[0].size)) {
+        kfree(strm->alsa_hw_desc);
+        strm->alsa_hw_desc = NULL;
     }
 }
 
