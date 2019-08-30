@@ -230,7 +230,7 @@ static snd_pcm_uframes_t aaudio_pcm_pointer(struct snd_pcm_substream *substream)
     }
     frames -= stream->latency;
     if (frames < 0)
-        frames += ((-frames - 1) / buffer_time_length + 1) * buffer_time_length;
+        frames += ((-frames - 1) / substream->runtime->buffer_size + 1) * substream->runtime->buffer_size;
     return (snd_pcm_uframes_t) frames;
 }
 
