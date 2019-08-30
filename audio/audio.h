@@ -84,6 +84,10 @@ struct aaudio_subdevice {
     struct snd_pcm *pcm;
     struct snd_jack *jack;
 };
+struct aaudio_alsa_pcm_id_mapping {
+    const char *name;
+    int alsa_id;
+};
 
 struct aaudio_device {
     struct pci_dev *pci;
@@ -113,5 +117,7 @@ void aaudio_handle_command(struct aaudio_device *a, struct aaudio_msg *msg);
 
 int aaudio_module_init(void);
 void aaudio_module_exit(void);
+
+extern struct aaudio_alsa_pcm_id_mapping aaudio_alsa_id_mappings[];
 
 #endif //AAUDIO_H

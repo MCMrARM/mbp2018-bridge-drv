@@ -93,7 +93,8 @@ static int aaudio_probe(struct pci_dev *dev, const struct pci_device_id *id)
     strcpy(aaudio->card->shortname, "Apple T2 Audio");
     strcpy(aaudio->card->longname, "Apple T2 Audio");
     strcpy(aaudio->card->mixername, "Apple T2 Audio");
-    aaudio->next_alsa_id = 0;
+    /* Dynamic alsa ids start at 100 */
+    aaudio->next_alsa_id = 100;
 
     if (aaudio_init_cmd(aaudio)) {
         dev_err(&dev->dev, "aaudio: Failed to initialize over BCE\n");
@@ -216,12 +217,6 @@ static void aaudio_init_dev(struct aaudio_device *a, aaudio_device_id_t dev_id)
     sdev->buf_id = AAUDIO_BUFFER_ID_NONE;
     strncpy(sdev->uid, uid, uid_len);
     sdev->uid[uid_len + 1] = '\0';
-
-    /* TESTING: Disable devices other than Speaker, Codec Output and Digital Mic */
-    if (strcmp(sdev->uid, "Speaker") != 0 && strcmp(sdev->uid, "Codec Output") != 0 &&
-        strcmp(sdev->uid, "Digital Mic") != 0) {
-        goto fail;
-    }
 
     if (aaudio_cmd_get_primitive_property(a, dev_id, dev_id,
             AAUDIO_PROP(AAUDIO_PROP_SCOPE_INPUT, AAUDIO_PROP_LATENCY, 0), NULL, 0, &sdev->in_latency, sizeof(u32)))
@@ -397,7 +392,7 @@ static int aaudio_init_bs(struct aaudio_device *a)
     }
     list_for_each_entry(sdev, &a->subdevice_list, list) {
         if (sdev->in_stream_cnt == 1) {
-            dev_info(a->dev, "aaudio: Device %i Host Stream; Input\n", sdev->buf_id, j, sdev->uid);
+            dev_info(a->dev, "aaudio: Device %i Host Stream; Input\n", sdev->buf_id);
             aaudio_init_bs_stream_host(a, &sdev->in_streams[0], &a->bs->devices[sdev->buf_id].input_streams[0]);
             a->bs->devices[sdev->buf_id].num_input_streams = 1;
             wmb();
@@ -646,6 +641,15 @@ void aaudio_module_exit(void)
     class_destroy(aaudio_class);
     unregister_chrdev_region(aaudio_chrdev, 1);
 }
+
+struct aaudio_alsa_pcm_id_mapping aaudio_alsa_id_mappings[] = {
+        {"Speaker", 0},
+        {"Digital Mic", 1},
+        {"Codec Output", 2},
+        {"Codec Input", 3},
+        {"Bridge Loopback", 4},
+        {}
+};
 
 module_param_named(index, aaudio_alsa_index, int, 0444);
 MODULE_PARM_DESC(index, "Index value for Apple Internal Audio soundcard.");
