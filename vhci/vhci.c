@@ -46,7 +46,6 @@ int bce_vhci_create(struct bce_device *dev, struct bce_vhci *vhci)
         goto fail_hcd;
     }
     vhci->hcd->self.sysdev = &dev->pci->dev;
-    vhci->hcd->self.uses_dma = 1;
     *((struct bce_vhci **) vhci->hcd->hcd_priv) = vhci;
     vhci->hcd->speed = HCD_USB2;
 
@@ -697,7 +696,7 @@ static const struct hc_driver bce_vhci_driver = {
         .product_desc = "BCE VHCI Host Controller",
         .hcd_priv_size = sizeof(struct bce_vhci *),
 
-        .flags = HCD_USB2,
+        .flags = HCD_USB2 | HCD_DMA,
 
         .start = bce_vhci_start,
         .stop = bce_vhci_stop,
