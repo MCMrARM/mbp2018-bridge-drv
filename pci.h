@@ -13,7 +13,7 @@
 #define BCE_QUEUE_USER_MAX (BCE_MAX_QUEUE_COUNT - 1)
 
 struct bce_device {
-    struct pci_dev *pci;
+    struct pci_dev *pci, *pci0;
     dev_t devt;
     struct device *dev;
     void __iomem *reg_mem_mb;
@@ -21,11 +21,16 @@ struct bce_device {
     struct bce_mailbox mbox;
     struct bce_timestamp timestamp;
     struct bce_queue *queues[BCE_MAX_QUEUE_COUNT];
+    struct spinlock queues_lock;
     struct ida queue_ida;
     struct bce_queue_cq *cmd_cq;
     struct bce_queue_cmdq *cmd_cmdq;
     struct bce_queue_sq *int_sq_list[BCE_MAX_QUEUE_COUNT];
     bool is_being_removed;
+
+    dma_addr_t saved_data_dma_addr;
+    void *saved_data_dma_ptr;
+    size_t saved_data_dma_size;
 
     struct bce_vhci vhci;
 };

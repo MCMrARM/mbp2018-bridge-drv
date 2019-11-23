@@ -1,5 +1,6 @@
 #include "pci.h"
 #include <linux/module.h>
+#include <linux/crc32.h>
 #include "audio/audio.h"
 
 static dev_t bce_chrdev;
@@ -28,6 +29,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         status = -ENODEV;
         goto fail;
     }
+    pci_set_master(dev);
     nvec = pci_alloc_irq_vectors(dev, 1, 8, PCI_IRQ_MSI);
     if (nvec < 5) {
         status = -EINVAL;
@@ -61,6 +63,7 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
     bce_mailbox_init(&bce->mbox, bce->reg_mem_mb);
     bce_timestamp_init(&bce->timestamp, bce->reg_mem_mb);
 
+    spin_lock_init(&bce->queues_lock);
     ida_init(&bce->queue_ida);
 
     if ((status = pci_request_irq(dev, 0, bce_handle_mb_irq, NULL, dev, "bce_mbox")))
@@ -73,7 +76,18 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
     }
 
-    bce_timestamp_start(&bce->timestamp);
+    /* Gets the function 0's interface. This is needed because Apple only accepts DMA on our function if function 0
+       is a bus master, so we need to work around this. */
+    bce->pci0 = pci_get_slot(dev->bus, PCI_DEVFN(PCI_SLOT(dev->devfn), 0));
+#ifndef WITHOUT_NVME_PATCH
+    if ((status = pci_enable_device_mem(bce->pci0))) {
+        dev_warn(&dev->dev, "bce: failed to enable function 0\n");
+        goto fail_dev0;
+    }
+#endif
+    pci_set_master(bce->pci0);
+
+    bce_timestamp_start(&bce->timestamp, true);
 
     if ((status = bce_fw_version_handshake(bce)))
         goto fail_ts;
@@ -92,6 +106,11 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 fail_ts:
     bce_timestamp_stop(&bce->timestamp);
+#ifndef WITHOUT_NVME_PATCH
+    pci_disable_device(bce->pci0);
+fail_dev0:
+#endif
+    pci_dev_put(bce->pci0);
 fail_interrupt:
     pci_free_irq(dev, 4, dev);
 fail_interrupt_0:
@@ -171,9 +190,11 @@ static irqreturn_t bce_handle_dma_irq(int irq, void *dev)
 {
     int i;
     struct bce_device *bce = pci_get_drvdata(dev);
+    spin_lock(&bce->queues_lock);
     for (i = 0; i < BCE_MAX_QUEUE_COUNT; i++)
         if (bce->queues[i] && bce->queues[i]->type == BCE_QUEUE_CQ)
             bce_handle_cq_completions(bce, (struct bce_queue_cq *) bce->queues[i]);
+    spin_unlock(&bce->queues_lock);
     return IRQ_HANDLED;
 }
 
@@ -220,6 +241,10 @@ static void bce_remove(struct pci_dev *dev)
     bce_vhci_destroy(&bce->vhci);
 
     bce_timestamp_stop(&bce->timestamp);
+#ifndef WITHOUT_NVME_PATCH
+    pci_disable_device(bce->pci0);
+#endif
+    pci_dev_put(bce->pci0);
     pci_free_irq(dev, 0, dev);
     pci_free_irq(dev, 4, dev);
     bce_free_command_queues(bce);
@@ -232,16 +257,131 @@ static void bce_remove(struct pci_dev *dev)
     kfree(bce);
 }
 
+static int bce_save_state_and_sleep(struct bce_device *bce)
+{
+    int attempt, status = 0;
+    u64 resp;
+    dma_addr_t dma_addr;
+    void *dma_ptr = NULL;
+    size_t size = max(PAGE_SIZE, 4096UL);
+
+    for (attempt = 0; attempt < 5; ++attempt) {
+        pr_debug("bce: suspend: attempt %i, buffer size %li\n", attempt, size);
+        dma_ptr = dma_alloc_coherent(&bce->pci->dev, size, &dma_addr, GFP_KERNEL);
+        if (!dma_ptr) {
+            pr_err("bce: suspend failed (data alloc failed)\n");
+            break;
+        }
+        BUG_ON((dma_addr % 4096) != 0);
+        status = bce_mailbox_send(&bce->mbox,
+                BCE_MB_MSG(BCE_MB_SAVE_STATE_AND_SLEEP, (dma_addr & ~(4096LLU - 1)) | (size / 4096)), &resp);
+        if (status) {
+            pr_err("bce: suspend failed (mailbox send)\n");
+            break;
+        }
+        if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_RESTORE_STATE_COMPLETE) {
+            bce->saved_data_dma_addr = dma_addr;
+            bce->saved_data_dma_ptr = dma_ptr;
+            bce->saved_data_dma_size = size;
+            return 0;
+        } else if (BCE_MB_TYPE(resp) == BCE_MB_SAVE_STATE_AND_SLEEP_FAILURE) {
+            dma_free_coherent(&bce->pci->dev, size, dma_ptr, dma_addr);
+            /* The 0x10ff magic value was extracted from Apple's driver */
+            size = (BCE_MB_VALUE(resp) + 0x10ff) & ~(4096LLU - 1);
+            pr_debug("bce: suspend: device requested a larger buffer (%li)\n", size);
+            continue;
+        } else {
+            pr_err("bce: suspend failed (invalid device response)\n");
+            status = -EINVAL;
+            break;
+        }
+    }
+    if (dma_ptr)
+        dma_free_coherent(&bce->pci->dev, size, dma_ptr, dma_addr);
+    if (!status)
+        return bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_SLEEP_NO_STATE, 0), &resp);
+    return status;
+}
+
+static int bce_restore_state_and_wake(struct bce_device *bce)
+{
+    int status;
+    u64 resp;
+    if (!bce->saved_data_dma_ptr) {
+        if ((status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_RESTORE_NO_STATE, 0), &resp))) {
+            pr_err("bce: resume with no state failed (mailbox send)\n");
+            return status;
+        }
+        if (BCE_MB_TYPE(resp) != BCE_MB_RESTORE_NO_STATE) {
+            pr_err("bce: resume with no state failed (invalid device response)\n");
+            return -EINVAL;
+        }
+        return 0;
+    }
+
+    if ((status = bce_mailbox_send(&bce->mbox, BCE_MB_MSG(BCE_MB_RESTORE_STATE_AND_WAKE,
+            (bce->saved_data_dma_addr & ~(4096LLU - 1)) | (bce->saved_data_dma_size / 4096)), &resp))) {
+        pr_err("bce: resume with state failed (mailbox send)\n");
+        goto finish_with_state;
+    }
+    if (BCE_MB_TYPE(resp) != BCE_MB_SAVE_RESTORE_STATE_COMPLETE) {
+        pr_err("bce: resume with state failed (invalid device response)\n");
+        status = -EINVAL;
+        goto finish_with_state;
+    }
+
+finish_with_state:
+    dma_free_coherent(&bce->pci->dev, bce->saved_data_dma_size, bce->saved_data_dma_ptr, bce->saved_data_dma_addr);
+    bce->saved_data_dma_ptr = NULL;
+    return status;
+}
+
+static int bce_suspend(struct device *dev)
+{
+    struct bce_device *bce = pci_get_drvdata(to_pci_dev(dev));
+    int status;
+
+    bce_timestamp_stop(&bce->timestamp);
+
+    if ((status = bce_save_state_and_sleep(bce)))
+        return status;
+
+    return 0;
+}
+
+static int bce_resume(struct device *dev)
+{
+    struct bce_device *bce = pci_get_drvdata(to_pci_dev(dev));
+    int status;
+
+    pci_set_master(bce->pci);
+    pci_set_master(bce->pci0);
+
+    if ((status = bce_restore_state_and_wake(bce)))
+        return status;
+
+    bce_timestamp_start(&bce->timestamp, false);
+
+    return 0;
+}
+
 static struct pci_device_id bce_ids[  ] = {
         { PCI_DEVICE(PCI_VENDOR_ID_APPLE, 0x1801) },
         { 0, },
 };
 
+struct dev_pm_ops bce_pci_driver_pm = {
+        .suspend = bce_suspend,
+        .resume = bce_resume
+};
 struct pci_driver bce_pci_driver = {
         .name = "bce",
         .id_table = bce_ids,
         .probe = bce_probe,
-        .remove = bce_remove
+        .remove = bce_remove,
+        .driver = {
+                .pm = &bce_pci_driver_pm
+        }
 };
 
 
@@ -264,7 +404,7 @@ static int __init bce_module_init(void)
     if (result)
         goto fail_drv;
 
-    aaudio_module_init();
+    //aaudio_module_init();
 
     return 0;
 
@@ -280,9 +420,10 @@ fail_chrdev:
 }
 static void __exit bce_module_exit(void)
 {
-    aaudio_module_exit();
-    bce_vhci_module_exit();
     pci_unregister_driver(&bce_pci_driver);
+
+    //aaudio_module_exit();
+    bce_vhci_module_exit();
     class_destroy(bce_class);
     unregister_chrdev_region(bce_chrdev, 1);
 }

@@ -81,6 +81,9 @@ void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg)
 {
     u32 __iomem *regb;
 
+    spin_lock_init(&ts->stop_sl);
+    ts->stopped = false;
+
     ts->reg = reg;
 
     regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
@@ -88,20 +91,40 @@ void bce_timestamp_init(struct bce_timestamp *ts, void __iomem *reg)
     ioread32(regb);
     mb();
 
-    iowrite32((u32) -4, regb + 2);
-    iowrite32((u32) -1, regb);
-
     timer_setup(&ts->timer, bc_send_timestamp, 0);
 }
 
-void bce_timestamp_start(struct bce_timestamp *ts)
+void bce_timestamp_start(struct bce_timestamp *ts, bool is_initial)
 {
+    unsigned long flags;
+    u32 __iomem *regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+
+    if (is_initial) {
+        iowrite32((u32) -4, regb + 2);
+        iowrite32((u32) -1, regb);
+    } else {
+        iowrite32((u32) -3, regb + 2);
+        iowrite32((u32) -1, regb);
+    }
+
+    spin_lock_irqsave(&ts->stop_sl, flags);
+    ts->stopped = false;
+    spin_unlock_irqrestore(&ts->stop_sl, flags);
     mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
 }
 
 void bce_timestamp_stop(struct bce_timestamp *ts)
 {
+    unsigned long flags;
+    u32 __iomem *regb = (u32*) ((u8*) ts->reg + REG_TIMESTAMP_BASE);
+
+    spin_lock_irqsave(&ts->stop_sl, flags);
+    ts->stopped = true;
+    spin_unlock_irqrestore(&ts->stop_sl, flags);
     del_timer_sync(&ts->timer);
+
+    iowrite32((u32) -2, regb + 2);
+    iowrite32((u32) -1, regb);
 }
 
 static void bc_send_timestamp(struct timer_list *tl)
@@ -119,7 +142,10 @@ static void bc_send_timestamp(struct timer_list *tl)
     bt = ktime_get_boottime();
     iowrite32((u32) bt, regb + 2);
     iowrite32((u32) (bt >> 32), regb);
-    local_irq_restore(flags);
 
-    mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
+    spin_lock(&ts->stop_sl);
+    if (!ts->stopped)
+        mod_timer(&ts->timer, jiffies + msecs_to_jiffies(150));
+    spin_unlock(&ts->stop_sl);
+    local_irq_restore(flags);
 }
