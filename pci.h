@@ -13,7 +13,7 @@
 #define BCE_QUEUE_USER_MAX (BCE_MAX_QUEUE_COUNT - 1)
 
 struct bce_device {
-    struct pci_dev *pci;
+    struct pci_dev *pci, *pci0;
     dev_t devt;
     struct device *dev;
     void __iomem *reg_mem_mb;

@@ -76,6 +76,17 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
         goto fail_interrupt;
     }
 
+    /* Gets the function 0's interface. This is needed because Apple only accepts DMA on our function if function 0
+       is a bus master, so we need to work around this. */
+    bce->pci0 = pci_get_slot(dev->bus, PCI_DEVFN(PCI_SLOT(dev->devfn), 0));
+#ifndef WITHOUT_NVME_PATCH
+    if ((status = pci_enable_device_mem(bce->pci0))) {
+        dev_warn(&dev->dev, "bce: failed to enable function 0\n");
+        goto fail_dev0;
+    }
+#endif
+    pci_set_master(bce->pci0);
+
     bce_timestamp_start(&bce->timestamp, true);
 
     if ((status = bce_fw_version_handshake(bce)))
@@ -95,6 +106,11 @@ static int bce_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 fail_ts:
     bce_timestamp_stop(&bce->timestamp);
+#ifndef WITHOUT_NVME_PATCH
+    pci_disable_device(bce->pci0);
+fail_dev0:
+#endif
+    pci_dev_put(bce->pci0);
 fail_interrupt:
     pci_free_irq(dev, 4, dev);
 fail_interrupt_0:
@@ -225,6 +241,10 @@ static void bce_remove(struct pci_dev *dev)
     bce_vhci_destroy(&bce->vhci);
 
     bce_timestamp_stop(&bce->timestamp);
+#ifndef WITHOUT_NVME_PATCH
+    pci_disable_device(bce->pci0);
+#endif
+    pci_dev_put(bce->pci0);
     pci_free_irq(dev, 0, dev);
     pci_free_irq(dev, 4, dev);
     bce_free_command_queues(bce);
@@ -326,7 +346,6 @@ static int bce_suspend(struct device *dev)
     if ((status = bce_save_state_and_sleep(bce)))
         return status;
 
-    pci_disable_device(bce->pci);
     return 0;
 }
 
@@ -335,16 +354,8 @@ static int bce_resume(struct device *dev)
     struct bce_device *bce = pci_get_drvdata(to_pci_dev(dev));
     int status;
 
-    if ((status = pci_enable_device(bce->pci)))
-        return status;
     pci_set_master(bce->pci);
-
-    /**
-     * NOTE: I have no idea why this msleep() is required. If the sleep is not done, the device is unable to read host
-     * DMA memory and the suspend fails (device panics). Note that non-DMA mailbox messages do work, only the DMA ones
-     * fail.
-     */
-    msleep(20);
+    pci_set_master(bce->pci0);
 
     if ((status = bce_restore_state_and_wake(bce)))
         return status;
