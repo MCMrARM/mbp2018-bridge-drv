@@ -251,7 +251,7 @@ static void bce_vhci_transfer_queue_on_complete(struct bce_vhci_transfer_queue *
     if (q->single_request_mode && !list_empty(&q->endp->urb_list)) {
         urb = list_first_entry(&q->endp->urb_list, struct urb, urb_list);
         vurb = urb->hcpriv;
-        if (vurb->state != BCE_VHCI_URB_PENDING) {
+        if (vurb->state != BCE_VHCI_URB_INIT_PENDING) {
             pr_err("bce-vhci: [%02x] Invalid URB state %i (should be PENDING)",
                    q->endp_addr, vurb->state);
             return;
@@ -289,13 +289,13 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
 
     if (q->active) {
         if (q->single_request_mode && !list_is_first(&urb->urb_list, &q->endp->urb_list))
-            status = BCE_VHCI_URB_PENDING;
+            status = BCE_VHCI_URB_INIT_PENDING;
         else
             status = bce_vhci_urb_init(vurb);
     } else {
         if (q->stalled)
             bce_vhci_transfer_queue_request_reset(q);
-        vurb->state = BCE_VHCI_URB_INIT_PAUSED;
+        vurb->state = BCE_VHCI_URB_INIT_PENDING;
     }
     if (status) {
         usb_hcd_unlink_urb_from_ep(q->vhci->hcd, urb);
@@ -607,7 +607,7 @@ static int bce_vhci_urb_transfer_completion(struct bce_vhci_urb *urb, struct bce
 static void bce_vhci_urb_resume(struct bce_vhci_urb *urb)
 {
     int status = 0;
-    if (urb->state == BCE_VHCI_URB_INIT_PAUSED) {
+    if (urb->state == BCE_VHCI_URB_INIT_PENDING) {
         bce_vhci_urb_init(urb);
     } else if (urb->state == BCE_VHCI_URB_WAITING_FOR_COMPLETION) {
         status = bce_vhci_urb_data_transfer_in(urb, NULL);
