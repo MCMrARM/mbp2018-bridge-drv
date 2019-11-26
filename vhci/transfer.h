@@ -14,6 +14,7 @@ struct bce_vhci_transfer_queue {
     struct bce_vhci *vhci;
     struct usb_host_endpoint *endp;
     enum bce_vhci_endpoint_state state;
+    bool single_request_mode;
     bool active, stalled;
     bool fw_paused;
     bce_vhci_device_t dev_addr;
@@ -28,6 +29,7 @@ struct bce_vhci_transfer_queue {
     struct work_struct w_reset;
 };
 enum bce_vhci_urb_state {
+    BCE_VHCI_URB_PENDING,
     BCE_VHCI_URB_INIT_PAUSED,
 
     BCE_VHCI_URB_WAITING_FOR_TRANSFER_REQUEST,

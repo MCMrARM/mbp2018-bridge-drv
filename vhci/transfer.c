@@ -8,6 +8,7 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq);
 static void bce_vhci_transfer_queue_giveback(struct bce_vhci_transfer_queue *q);
 static void bce_vhci_transfer_queue_remove_pending(struct bce_vhci_transfer_queue *q);
 
+static int bce_vhci_urb_init(struct bce_vhci_urb *vurb);
 static int bce_vhci_urb_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg);
 static int bce_vhci_urb_transfer_completion(struct bce_vhci_urb *urb, struct bce_sq_completion_data *c);
 
@@ -27,6 +28,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     q->state = BCE_VHCI_ENDPOINT_ACTIVE;
     q->active = true;
     q->stalled = false;
+    q->single_request_mode = (dir == DMA_FROM_DEVICE);
     q->cq = bce_create_cq(vhci->dev, 0x100);
     INIT_WORK(&q->w_reset, bce_vhci_transfer_queue_reset_w);
     q->sq_in = NULL;
@@ -205,6 +207,8 @@ int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
     list_for_each_entry_safe(urb, urbt, &q->endp->urb_list, urb_list) {
         vurb = urb->hcpriv;
         bce_vhci_urb_resume(vurb);
+        if (q->single_request_mode)
+            break;
     }
     bce_vhci_transfer_queue_deliver_pending(q);
     spin_unlock_irqrestore(&q->urb_lock, flags);
@@ -240,6 +244,22 @@ void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q)
     queue_work(q->vhci->tq_state_wq, &q->w_reset);
 }
 
+static void bce_vhci_transfer_queue_on_complete(struct bce_vhci_transfer_queue *q)
+{
+    struct urb *urb;
+    struct bce_vhci_urb *vurb;
+    if (q->single_request_mode && !list_empty(&q->endp->urb_list)) {
+        urb = list_first_entry(&q->endp->urb_list, struct urb, urb_list);
+        vurb = urb->hcpriv;
+        if (vurb->state != BCE_VHCI_URB_PENDING) {
+            pr_err("bce-vhci: [%02x] Invalid URB state %i (should be PENDING)",
+                   q->endp_addr, vurb->state);
+            return;
+        }
+        bce_vhci_urb_init(vurb);
+    }
+}
+
 
 
 static int bce_vhci_urb_init(struct bce_vhci_urb *vurb);
@@ -268,7 +288,10 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
     }
 
     if (q->active) {
-        status = bce_vhci_urb_init(vurb);
+        if (q->single_request_mode && !list_is_first(&urb->urb_list, &q->endp->urb_list))
+            status = BCE_VHCI_URB_PENDING;
+        else
+            status = bce_vhci_urb_init(vurb);
     } else {
         if (q->stalled)
             bce_vhci_transfer_queue_request_reset(q);
@@ -308,6 +331,7 @@ static void bce_vhci_urb_complete(struct bce_vhci_urb *urb, int status)
     real_urb->status = status;
     kfree(urb);
     list_add_tail(&real_urb->urb_list, &q->giveback_urb_list);
+    bce_vhci_transfer_queue_on_complete(q);
 }
 
 static int bce_vhci_urb_remove(struct bce_vhci_transfer_queue *q, struct urb *urb, int status)
