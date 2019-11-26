@@ -3,8 +3,8 @@ bce-objs := pci.o mailbox.o queue.o queue_dma.o vhci/vhci.o vhci/queue.o vhci/tr
 
 MY_CFLAGS += -DWITHOUT_NVME_PATCH
 #MY_CFLAGS += -g -DDEBUG
-#ccflags-y += ${MY_CFLAGS}
-#CC += ${MY_CFLAGS}
+ccflags-y += ${MY_CFLAGS}
+CC += ${MY_CFLAGS}
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
