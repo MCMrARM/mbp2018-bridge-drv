@@ -269,7 +269,7 @@ static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
     q->stalled = false;
     spin_unlock_irqrestore(&q->urb_lock, flags);
     mutex_unlock(&q->pause_lock);
-    bce_vhci_transfer_queue_resume(q, BCE_VHCI_PAUSE_INTERNAL_WQ | BCE_VHCI_PAUSE_FIRMWARE); // TODO: validate if clearing FIRMWARE pause here is correct?
+    bce_vhci_transfer_queue_resume(q, BCE_VHCI_PAUSE_INTERNAL_WQ);
 }
 
 void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q)
