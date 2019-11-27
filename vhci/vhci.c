@@ -249,7 +249,7 @@ static void bce_vhci_free_device(struct usb_hcd *hcd, struct usb_device *udev)
     dev = vhci->devices[devid];
     for (i = 0; i < 32; i++) {
         if (dev->tq_mask & BIT(i)) {
-            bce_vhci_transfer_queue_pause(&dev->tq[i]);
+            bce_vhci_transfer_queue_pause(&dev->tq[i], BCE_VHCI_PAUSE_SHUTDOWN);
             bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) i);
             bce_vhci_destroy_transfer_queue(vhci, &dev->tq[i]);
         }
@@ -275,7 +275,7 @@ static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
 
         for (i = 0; i < 32; i++) {
             if (dev->tq_mask & BIT(i)) {
-                bce_vhci_transfer_queue_pause(&dev->tq[i]);
+                bce_vhci_transfer_queue_pause(&dev->tq[i], BCE_VHCI_PAUSE_SHUTDOWN);
                 bce_vhci_cmd_endpoint_destroy(&vhci->cq, devid, (u8) i);
                 bce_vhci_destroy_transfer_queue(vhci, &dev->tq[i]);
             }
@@ -335,7 +335,8 @@ static int bce_vhci_bus_suspend(struct usb_hcd *hcd)
         for (j = 0; j < 32; j++) {
             if (!(vhci->devices[vhci->port_to_device[i]]->tq_mask & BIT(j)))
                 continue;
-            bce_vhci_transfer_queue_pause(&vhci->devices[vhci->port_to_device[i]]->tq[j]);
+            bce_vhci_transfer_queue_pause(&vhci->devices[vhci->port_to_device[i]]->tq[j],
+                    BCE_VHCI_PAUSE_SUSPEND);
         }
     }
 
@@ -388,7 +389,8 @@ static int bce_vhci_bus_resume(struct usb_hcd *hcd)
         for (j = 0; j < 32; j++) {
             if (!(vhci->devices[vhci->port_to_device[i]]->tq_mask & BIT(j)))
                 continue;
-            bce_vhci_transfer_queue_resume(&vhci->devices[vhci->port_to_device[i]]->tq[j]);
+            bce_vhci_transfer_queue_resume(&vhci->devices[vhci->port_to_device[i]]->tq[j],
+                    BCE_VHCI_PAUSE_SUSPEND);
         }
     }
 
@@ -568,12 +570,10 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
 
     if (msg->cmd == BCE_VHCI_CMD_ENDPOINT_REQUEST_STATE) {
         if (msg->param2 == BCE_VHCI_ENDPOINT_ACTIVE) {
-            bce_vhci_transfer_queue_resume(tq);
-            tq->fw_paused = false;
+            bce_vhci_transfer_queue_resume(tq, BCE_VHCI_PAUSE_FIRMWARE);
             return BCE_VHCI_SUCCESS;
         } else if (msg->param2 == BCE_VHCI_ENDPOINT_PAUSED) {
-            tq->fw_paused = true;
-            bce_vhci_transfer_queue_pause(tq);
+            bce_vhci_transfer_queue_pause(tq, BCE_VHCI_PAUSE_FIRMWARE);
             return BCE_VHCI_SUCCESS;
         }
         return BCE_VHCI_BAD_ARGUMENT;
@@ -581,7 +581,6 @@ static int bce_vhci_handle_firmware_event(struct bce_vhci *vhci, struct bce_vhci
         if (msg->param2 == BCE_VHCI_ENDPOINT_STALLED) {
             tq->state = msg->param2;
             spin_lock_irqsave(&tq->urb_lock, flags);
-            tq->active = false;
             tq->stalled = true;
             spin_unlock_irqrestore(&tq->urb_lock, flags);
             return BCE_VHCI_SUCCESS;

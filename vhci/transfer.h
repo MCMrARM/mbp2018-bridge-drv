@@ -10,13 +10,19 @@ struct bce_vhci_list_message {
     struct list_head list;
     struct bce_vhci_message msg;
 };
+enum bce_vhci_pause_source {
+    BCE_VHCI_PAUSE_INTERNAL_WQ = 1,
+    BCE_VHCI_PAUSE_FIRMWARE = 2,
+    BCE_VHCI_PAUSE_SUSPEND = 4,
+    BCE_VHCI_PAUSE_SHUTDOWN = 8
+};
 struct bce_vhci_transfer_queue {
     struct bce_vhci *vhci;
     struct usb_host_endpoint *endp;
     enum bce_vhci_endpoint_state state;
     bool single_request_mode;
     bool active, stalled;
-    bool fw_paused;
+    u32 paused_by;
     bce_vhci_device_t dev_addr;
     u8 endp_addr;
     struct bce_queue_cq *cq;
@@ -24,6 +30,7 @@ struct bce_vhci_transfer_queue {
     struct bce_queue_sq *sq_out;
     struct list_head evq;
     struct spinlock urb_lock;
+    struct mutex pause_lock;
     struct list_head giveback_urb_list;
 
     struct work_struct w_reset;
@@ -61,8 +68,8 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
         struct usb_host_endpoint *endp, bce_vhci_device_t dev_addr, enum dma_data_direction dir);
 void bce_vhci_destroy_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_transfer_queue *q);
 void bce_vhci_transfer_queue_event(struct bce_vhci_transfer_queue *q, struct bce_vhci_message *msg);
-int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q);
-int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q);
+int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q, enum bce_vhci_pause_source src);
+int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q, enum bce_vhci_pause_source src);
 void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q);
 
 int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb);

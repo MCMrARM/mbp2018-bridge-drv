@@ -21,6 +21,7 @@ void bce_vhci_create_transfer_queue(struct bce_vhci *vhci, struct bce_vhci_trans
     INIT_LIST_HEAD(&q->evq);
     INIT_LIST_HEAD(&q->giveback_urb_list);
     spin_lock_init(&q->urb_lock);
+    mutex_init(&q->pause_lock);
     q->vhci = vhci;
     q->endp = endp;
     q->dev_addr = dev_addr;
@@ -164,7 +165,7 @@ static void bce_vhci_transfer_queue_completion(struct bce_queue_sq *sq)
     bce_vhci_transfer_queue_giveback(q);
 }
 
-int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
+int bce_vhci_transfer_queue_do_pause(struct bce_vhci_transfer_queue *q)
 {
     unsigned long flags;
     int status;
@@ -190,7 +191,7 @@ int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q)
 
 static void bce_vhci_urb_resume(struct bce_vhci_urb *urb);
 
-int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
+int bce_vhci_transfer_queue_do_resume(struct bce_vhci_transfer_queue *q)
 {
     unsigned long flags;
     int status;
@@ -215,28 +216,60 @@ int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q)
     return 0;
 }
 
+int bce_vhci_transfer_queue_pause(struct bce_vhci_transfer_queue *q, enum bce_vhci_pause_source src)
+{
+    int ret = 0;
+    mutex_lock(&q->pause_lock);
+    if ((q->paused_by & src) != src) {
+        if (!q->paused_by)
+            ret = bce_vhci_transfer_queue_do_pause(q);
+        if (!ret)
+            q->paused_by |= src;
+    }
+    mutex_unlock(&q->pause_lock);
+    return ret;
+}
+
+int bce_vhci_transfer_queue_resume(struct bce_vhci_transfer_queue *q, enum bce_vhci_pause_source src)
+{
+    int ret = 0;
+    mutex_lock(&q->pause_lock);
+    if (q->paused_by & src) {
+        if (!(q->paused_by & ~src))
+            ret = bce_vhci_transfer_queue_do_resume(q);
+        if (!ret)
+            q->paused_by &= ~src;
+    }
+    mutex_unlock(&q->pause_lock);
+    return ret;
+}
+
 static void bce_vhci_transfer_queue_reset_w(struct work_struct *work)
 {
     unsigned long flags;
     struct bce_vhci_transfer_queue *q = container_of(work, struct bce_vhci_transfer_queue, w_reset);
 
+    mutex_lock(&q->pause_lock);
     spin_lock_irqsave(&q->urb_lock, flags);
     if (!q->stalled) {
         spin_unlock_irqrestore(&q->urb_lock, flags);
+        mutex_unlock(&q->pause_lock);
         return;
     }
+    q->active = false;
     spin_unlock_irqrestore(&q->urb_lock, flags);
+    q->paused_by |= BCE_VHCI_PAUSE_INTERNAL_WQ;
     bce_vhci_transfer_queue_remove_pending(q);
     if (q->sq_in)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_in->qid);
     if (q->sq_out)
         bce_cmd_flush_memory_queue(q->vhci->dev->cmd_cmdq, (u16) q->sq_out->qid);
     bce_vhci_cmd_endpoint_reset(&q->vhci->cq, q->dev_addr, (u8) (q->endp->desc.bEndpointAddress & 0x8F));
-    q->fw_paused = false;
     spin_lock_irqsave(&q->urb_lock, flags);
     q->stalled = false;
     spin_unlock_irqrestore(&q->urb_lock, flags);
-    bce_vhci_transfer_queue_resume(q);
+    mutex_unlock(&q->pause_lock);
+    bce_vhci_transfer_queue_resume(q, BCE_VHCI_PAUSE_INTERNAL_WQ | BCE_VHCI_PAUSE_FIRMWARE); // TODO: validate if clearing FIRMWARE pause here is correct?
 }
 
 void bce_vhci_transfer_queue_request_reset(struct bce_vhci_transfer_queue *q)
@@ -359,10 +392,9 @@ static void bce_vhci_urb_cancel_w(struct work_struct *ws)
             container_of(ws, struct bce_vhci_transfer_queue_urb_cancel_work, ws);
 
     pr_debug("bce-vhci: [%02x] Cancelling URB\n", w->q->endp_addr);
-    bce_vhci_transfer_queue_pause(w->q);
+    bce_vhci_transfer_queue_pause(w->q, BCE_VHCI_PAUSE_INTERNAL_WQ);
     bce_vhci_urb_remove(w->q, w->urb, w->status);
-    if (!w->q->fw_paused)
-        bce_vhci_transfer_queue_resume(w->q);
+    bce_vhci_transfer_queue_resume(w->q, BCE_VHCI_PAUSE_INTERNAL_WQ);
     kfree(w);
 }
 
