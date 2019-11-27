@@ -207,14 +207,12 @@ void bce_vhci_command_queue_deliver_completion(struct bce_vhci_command_queue *cq
     spin_unlock(&cq->completion_lock);
 }
 
-static int bce_vhci_command_queue_cancel(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
-        struct bce_vhci_message *res);
-
-int __bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
+static int __bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
         struct bce_vhci_message *res, unsigned long timeout)
 {
     int status;
     struct bce_vhci_command_queue_completion *c;
+    struct bce_vhci_message creq;
     c = &cq->completion;
 
     if ((status = bce_reserve_submission(cq->mq->sq, &timeout)))
@@ -228,41 +226,35 @@ int __bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct b
     bce_vhci_message_queue_write(cq->mq, req);
 
     if (!wait_for_completion_timeout(&c->completion, timeout)) {
-        /* we ran out of time, clean up info */
-        spin_lock(&cq->completion_lock);
-        c->result = NULL;
-        spin_unlock(&cq->completion_lock);
+        /* we ran out of time, send cancellation */
+        pr_debug("bce-vhci: command timed out req=%x\n", req->cmd);
+        if ((status = bce_reserve_submission(cq->mq->sq, &timeout)))
+            return status;
 
-        if (!(req->cmd & 0x4000))
-            return bce_vhci_command_queue_cancel(cq, req, res);
+        creq = *req;
+        creq.cmd |= 0x4000;
+        bce_vhci_message_queue_write(cq->mq, &creq);
 
-        return -ETIMEDOUT;
+        if (!wait_for_completion_timeout(&c->completion, 1000)) {
+            pr_err("bce-vhci: Possible desync, cmd cancel timed out\n");
+
+            spin_lock(&cq->completion_lock);
+            c->result = NULL;
+            spin_unlock(&cq->completion_lock);
+            return -ETIMEDOUT;
+        }
+        if ((res->cmd & ~0x8000) == creq.cmd)
+            return -ETIMEDOUT;
+        /* reply for the previous command most likely arrived */
     }
 
-    if ((res->cmd & ~0xC000) != (req->cmd & ~0x4000)) {
+    if ((res->cmd & ~0x8000) != req->cmd) {
         pr_err("bce-vhci: Possible desync, cmd reply mismatch req=%x, res=%x\n", req->cmd, res->cmd);
         return -EIO;
     }
     if (res->status == BCE_VHCI_SUCCESS)
         return 0;
     return res->status;
-}
-
-static int bce_vhci_command_queue_cancel(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
-        struct bce_vhci_message *res)
-{
-    int status;
-    struct bce_vhci_message creq;
-    creq = *req;
-    creq.cmd |= 0x4000;
-    status = __bce_vhci_command_queue_execute(cq, &creq, res, 1000);
-    if (status == -ETIMEDOUT) {
-        pr_err("bce-vhci: Possible desync, cancel timeout\n");
-        return -ETIMEDOUT;
-    }
-    if (!(res->cmd & 0x4000)) /* The abort did not get through probably */
-        return status;
-    return -ETIMEDOUT;
 }
 
 int bce_vhci_command_queue_execute(struct bce_vhci_command_queue *cq, struct bce_vhci_message *req,
