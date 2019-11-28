@@ -20,7 +20,7 @@ struct bce_vhci_transfer_queue {
     struct bce_vhci *vhci;
     struct usb_host_endpoint *endp;
     enum bce_vhci_endpoint_state state;
-    bool single_request_mode;
+    u32 max_active_requests, remaining_active_requests;
     bool active, stalled;
     u32 paused_by;
     bce_vhci_device_t dev_addr;

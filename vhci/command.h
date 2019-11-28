@@ -8,6 +8,9 @@
 #define BCE_VHCI_CMD_TIMEOUT_SHORT msecs_to_jiffies(2000)
 #define BCE_VHCI_CMD_TIMEOUT_LONG msecs_to_jiffies(30000)
 
+#define BCE_VHCI_BULK_MAX_ACTIVE_URBS_POW2 2
+#define BCE_VHCI_BULK_MAX_ACTIVE_URBS (1 << BCE_VHCI_BULK_MAX_ACTIVE_URBS_POW2)
+
 typedef u8 bce_vhci_port_t;
 typedef u8 bce_vhci_device_t;
 
@@ -159,11 +162,12 @@ static inline int bce_vhci_cmd_endpoint_create(struct bce_vhci_command_queue *q,
     int endpoint_type = usb_endpoint_type(desc);
     int maxp = usb_endpoint_maxp(desc);
     int maxp_burst = usb_endpoint_maxp_mult(desc) * maxp;
+    u8 max_active_requests_pow2 = 0;
     cmd.cmd = BCE_VHCI_CMD_ENDPOINT_CREATE;
     cmd.param1 = dev | ((desc->bEndpointAddress & 0x8Fu) << 8);
-    cmd.param2 = endpoint_type | (maxp << 16) | ((u64) maxp_burst << 32);
     if (endpoint_type == USB_ENDPOINT_XFER_BULK)
-        cmd.param2 |= 0x20;
+        max_active_requests_pow2 = BCE_VHCI_BULK_MAX_ACTIVE_URBS_POW2;
+    cmd.param2 = endpoint_type | ((max_active_requests_pow2 & 0xf) << 4) | (maxp << 16) | ((u64) maxp_burst << 32);
     if (endpoint_type == USB_ENDPOINT_XFER_INT)
         cmd.param2 |= (desc->bInterval - 1) << 8;
     return bce_vhci_command_queue_execute(q, &cmd, &res, BCE_VHCI_CMD_TIMEOUT_SHORT);
