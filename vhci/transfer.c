@@ -340,7 +340,7 @@ int bce_vhci_urb_create(struct bce_vhci_transfer_queue *q, struct urb *urb)
         if (bce_vhci_transfer_queue_can_init_urb(vurb->q))
             status = bce_vhci_urb_init(vurb);
         else
-            status = BCE_VHCI_URB_INIT_PENDING;
+            vurb->state = BCE_VHCI_URB_INIT_PENDING;
     } else {
         if (q->stalled)
             bce_vhci_transfer_queue_request_reset(q);
@@ -417,7 +417,7 @@ static int bce_vhci_urb_remove(struct bce_vhci_transfer_queue *q, struct urb *ur
     spin_lock_irqsave(&q->urb_lock, flags);
     ret = bce_vhci_urb_dequeue_unlink(q, urb, status);
     spin_unlock_irqrestore(&q->urb_lock, flags);
-    if (!ret)
+    if (ret)
         return ret;
     vurb = urb->hcpriv;
     kfree(vurb);
@@ -672,6 +672,8 @@ static int bce_vhci_urb_control_transfer_completion(struct bce_vhci_urb *urb, st
 
 static int bce_vhci_urb_update(struct bce_vhci_urb *urb, struct bce_vhci_message *msg)
 {
+    if (urb->state == BCE_VHCI_URB_INIT_PENDING)
+        return -EAGAIN;
     if (urb->is_control)
         return bce_vhci_urb_control_update(urb, msg);
     else
