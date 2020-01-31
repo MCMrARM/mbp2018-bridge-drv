@@ -236,6 +236,12 @@ static int bce_vhci_enable_device(struct usb_hcd *hcd, struct usb_device *udev)
     return 0;
 }
 
+static int bce_vhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
+{
+    /* This is the same as enable_device, but instead in the old scheme */
+    return bce_vhci_enable_device(hcd, udev);
+}
+
 static void bce_vhci_free_device(struct usb_hcd *hcd, struct usb_device *udev)
 {
     struct bce_vhci *vhci = bce_vhci_from_hcd(hcd);
@@ -304,11 +310,6 @@ static int bce_vhci_reset_device(struct bce_vhci *vhci, int index, u16 timeout)
     }
 
     return status;
-}
-
-static int bce_vhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
-{
-    return 0;
 }
 
 static int bce_vhci_check_bandwidth(struct usb_hcd *hcd, struct usb_device *udev)
